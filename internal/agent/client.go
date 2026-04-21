@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,7 @@ const (
 
 type Client struct {
 	cfg     config.AgentConfig
+	agentID string
 	targets map[string]string
 }
 
@@ -49,6 +51,7 @@ func NewClient(cfg config.AgentConfig) (*Client, error) {
 
 	return &Client{
 		cfg:     cfg,
+		agentID: cfg.AgentID,
 		targets: targets,
 	}, nil
 }
@@ -63,6 +66,10 @@ func (c *Client) Start(ctx context.Context) error {
 		}
 		if err != nil && errors.Is(err, errUnauthorized) {
 			log.Printf("gotunnel: relay rejected credentials")
+			return err
+		}
+		if err != nil && errors.Is(err, errDuplicateAgentID) {
+			log.Printf("gotunnel: duplicate agent id rejected by relay")
 			return err
 		}
 		if err != nil {
@@ -83,6 +90,7 @@ func (c *Client) Start(ctx context.Context) error {
 }
 
 var errUnauthorized = errors.New("unauthorized")
+var errDuplicateAgentID = errors.New("duplicate active agent id")
 
 func (c *Client) runOnce(ctx context.Context) error {
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, c.cfg.RelayURL, nil)
@@ -122,11 +130,29 @@ func (c *Client) runOnce(ctx context.Context) error {
 	for name := range c.targets {
 		targetNames = append(targetNames, name)
 	}
-	registerPayload, _ := json.Marshal(protocol.RegisterRequest{Targets: targetNames})
+	registerPayload, _ := json.Marshal(protocol.RegisterRequest{
+		AgentID: c.agentID,
+		Targets: targetNames,
+	})
 	if err := sess.write(protocol.Frame{Type: protocol.FrameRegister, Payload: registerPayload}); err != nil {
 		return err
 	}
-	log.Printf("gotunnel: registered %d target(s)", len(targetNames))
+
+	registerReply, err := readFrame(conn)
+	if err != nil {
+		return err
+	}
+	if registerReply.Type == protocol.FrameError {
+		msg := string(registerReply.Payload)
+		if strings.HasPrefix(msg, "duplicate active agent id:") {
+			return errDuplicateAgentID
+		}
+		return errors.New(msg)
+	}
+	if registerReply.Type != protocol.FrameRegisterOK {
+		return fmt.Errorf("unexpected register reply: %v", registerReply.Type)
+	}
+	log.Printf("gotunnel: registered agent %s with %d target(s)", c.agentID, len(targetNames))
 
 	for {
 		select {

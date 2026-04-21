@@ -5,6 +5,7 @@ type AuthRequest struct {
 }
 
 type RegisterRequest struct {
+	AgentID string   `json:"agent_id"`
 	Targets []string `json:"targets"`
 }
 

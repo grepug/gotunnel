@@ -19,10 +19,13 @@ type RelayConfig struct {
 type PortMapping struct {
 	Name       string `json:"name"`
 	ListenAddr string `json:"listen_addr"`
+	AgentID    string `json:"agent_id"`
+	TargetName string `json:"target_name"`
 }
 
 type AgentConfig struct {
 	RelayURL      string          `json:"relay_url"`
+	AgentID       string          `json:"agent_id"`
 	AuthToken     string          `json:"auth_token"`
 	AllowInsecure bool            `json:"allow_insecure"`
 	Targets       []TargetMapping `json:"targets"`
@@ -69,6 +72,12 @@ func (c RelayConfig) Validate() error {
 		if _, err := net.ResolveTCPAddr("tcp", port.ListenAddr); err != nil {
 			return fmt.Errorf("invalid listen address for %s: %w", port.Name, err)
 		}
+		if port.AgentID == "" {
+			return fmt.Errorf("agent_id is required for port mapping %s", port.Name)
+		}
+		if port.TargetName == "" {
+			return fmt.Errorf("target_name is required for port mapping %s", port.Name)
+		}
 	}
 
 	return nil
@@ -87,6 +96,9 @@ func (c AgentConfig) Validate() error {
 	}
 	if parsed.Scheme == "ws" && !c.AllowInsecure {
 		return errors.New("plain ws relay URL requires allow_insecure to be true")
+	}
+	if c.AgentID == "" {
+		return errors.New("agent_id is required")
 	}
 	if c.AuthToken == "" {
 		return errors.New("auth token is required")

@@ -8,15 +8,21 @@
   "ports": [
     {
       "name": "ssh",
-      "listen_addr": "0.0.0.0:2222"
+      "listen_addr": "0.0.0.0:2222",
+      "agent_id": "home-mac",
+      "target_name": "ssh"
     },
     {
       "name": "web",
-      "listen_addr": "0.0.0.0:8080"
+      "listen_addr": "0.0.0.0:8080",
+      "agent_id": "home-mac",
+      "target_name": "web"
     },
     {
       "name": "rdp",
-      "listen_addr": "0.0.0.0:3389"
+      "listen_addr": "0.0.0.0:3389",
+      "agent_id": "office-pc",
+      "target_name": "rdp"
     }
   ]
 }
