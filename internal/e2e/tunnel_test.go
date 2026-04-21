@@ -2,9 +2,12 @@ package e2e_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -621,6 +624,108 @@ func TestTunnelRejectsCredentialForDifferentNamedAgent(t *testing.T) {
 	}
 }
 
+func TestRelayPersistsRegistrationStateAcrossDisconnectAndRestart(t *testing.T) {
+	t.Parallel()
+
+	parentCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	controlAddr := reserveTCPAddress(t)
+	publicAddr := reserveTCPAddress(t)
+	stateFile := filepath.Join(t.TempDir(), "relay-state.json")
+	targetAddr := startEchoServer(t)
+
+	relayCfg := config.RelayConfig{
+		ControlAddr: controlAddr,
+		Agents: []config.AgentAuth{
+			{AgentID: "mac-mini", AuthToken: "secret"},
+		},
+		StateFile:     stateFile,
+		AllowInsecure: true,
+		Ports: []config.PortMapping{
+			{Name: "ssh", ListenAddr: publicAddr, AgentID: "mac-mini", TargetName: "ssh"},
+		},
+	}
+
+	relayServer, err := relay.NewServer(relayCfg)
+	if err != nil {
+		t.Fatalf("new relay server: %v", err)
+	}
+
+	relayCtx, stopRelay := context.WithCancel(parentCtx)
+	go func() {
+		if err := relayServer.Start(relayCtx); err != nil && relayCtx.Err() == nil {
+			t.Errorf("relay start: %v", err)
+		}
+	}()
+
+	agentClient, err := agent.NewClient(config.AgentConfig{
+		RelayURL:      relayServer.ControlURL(),
+		AgentID:       "mac-mini",
+		AuthToken:     "secret",
+		AllowInsecure: true,
+		Targets: []config.TargetMapping{
+			{Name: "ssh", LocalAddr: targetAddr},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new agent client: %v", err)
+	}
+
+	go func() {
+		if err := agentClient.Start(parentCtx); err != nil && parentCtx.Err() == nil {
+			t.Errorf("agent start: %v", err)
+		}
+	}()
+
+	waitForForwarding(t, publicAddr)
+	state := waitForRelayState(t, stateFile, "mac-mini", "active")
+	if got := state.Agents["mac-mini"].LastKnownTargets; len(got) != 1 || got[0] != "ssh" {
+		t.Fatalf("unexpected persisted targets: %+v", got)
+	}
+
+	stopRelay()
+	state = waitForRelayState(t, stateFile, "mac-mini", "inactive")
+
+	relayServer, err = relay.NewServer(relayCfg)
+	if err != nil {
+		t.Fatalf("restart relay server: %v", err)
+	}
+
+	relayCtx, stopRelay = context.WithCancel(parentCtx)
+	defer stopRelay()
+	go func() {
+		if err := relayServer.Start(relayCtx); err != nil && relayCtx.Err() == nil {
+			t.Errorf("relay restart: %v", err)
+		}
+	}()
+
+	state = waitForRelayState(t, stateFile, "mac-mini", "inactive")
+	if got := state.Agents["mac-mini"].LastKnownTargets; len(got) != 1 || got[0] != "ssh" {
+		t.Fatalf("unexpected persisted targets after restart: %+v", got)
+	}
+
+	waitForForwarding(t, publicAddr)
+	state = waitForRelayState(t, stateFile, "mac-mini", "active")
+	if len(state.Agents) != 1 {
+		t.Fatalf("expected one persisted agent record, got %d", len(state.Agents))
+	}
+
+	stopRelay()
+	time.Sleep(200 * time.Millisecond)
+}
+
+type relayStateFile struct {
+	Version int                           `json:"version"`
+	Agents  map[string]persistedAgentInfo `json:"agents"`
+}
+
+type persistedAgentInfo struct {
+	AgentID          string   `json:"agent_id"`
+	Status           string   `json:"status"`
+	LastKnownTargets []string `json:"last_known_targets"`
+}
+
 func startEchoServer(t *testing.T) string {
 	t.Helper()
 
@@ -761,4 +866,39 @@ func waitForPublicAddr(t *testing.T, relayServer *relay.Server, name string) str
 
 func isConnClosed(err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed)
+}
+
+func waitForRelayState(t *testing.T, path, agentID, wantStatus string) relayStateFile {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		state, err := readRelayState(path)
+		if err == nil {
+			record, ok := state.Agents[agentID]
+			if ok && record.Status == wantStatus {
+				return state
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	t.Fatalf("relay state for %s did not reach status %s in time", agentID, wantStatus)
+	return relayStateFile{}
+}
+
+func readRelayState(path string) (relayStateFile, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return relayStateFile{}, err
+	}
+
+	var state relayStateFile
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return relayStateFile{}, err
+	}
+	if state.Agents == nil {
+		state.Agents = make(map[string]persistedAgentInfo)
+	}
+	return state, nil
 }

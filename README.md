@@ -84,20 +84,21 @@ go build ./cmd/gotunnel ./cmd/gotunneld
 ## Quick start
 
 1. Copy the example configs and replace the per-agent credentials and agent IDs.
-2. For a real deployment, point the relay config at your TLS certificate and key and use a `wss://` relay URL in the agent config.
-3. Start the relay on the VPS:
+2. Choose a relay-local `state_file` path so the relay can persist last-known agent registration state.
+3. For a real deployment, point the relay config at your TLS certificate and key and use a `wss://` relay URL in the agent config.
+4. Start the relay on the VPS:
 
 ```bash
 ./gotunneld -config /path/to/relay.json
 ```
 
-4. Start the agent on the local machine:
+5. Start the agent on the local machine:
 
 ```bash
 ./gotunnel -config /path/to/agent.json
 ```
 
-5. Connect to the VPS public port you mapped.
+6. Connect to the VPS public port you mapped.
 
 Example:
 
@@ -184,6 +185,7 @@ Fields:
 - `agents[].auth_token`: credential accepted only for that named agent
 - `tls_cert_file`: certificate for the control connection
 - `tls_key_file`: private key for the control connection
+- `state_file`: relay-local JSON file for persisted named-agent registration metadata
 - `allow_insecure`: only for local testing; allows plain `ws://`
 - `ports`: public TCP listeners exposed on the VPS
 - `ports[].name`: public listener name
@@ -213,13 +215,14 @@ With both binaries running, connecting to `vps:2222` reaches the local machine's
 
 Different agents can expose the same target name, such as `ssh`, as long as each relay port mapping points to the intended `agent_id` explicitly.
 
+When `state_file` is configured, the relay persists one record per named agent with last-known targets and connection status. That metadata survives relay restarts, but credentials and per-port routing still come from static config.
+
 ## Current limitations
 
 - no hostname-based HTTP routing yet
 - no session preservation across reconnect
 - no multi-agent failover
-- no persistent control-plane state yet
 - no management API for dynamically registering or editing agents
-- no persisted control-plane registrations yet
+- no dynamic agent provisioning yet
 
 Those are deliberate `A`-phase omissions so the transport core can stay small and reliable first.

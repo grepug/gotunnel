@@ -10,6 +10,7 @@ import (
 type RelayConfig struct {
 	ControlAddr   string        `json:"control_addr"`
 	Agents        []AgentAuth   `json:"agents"`
+	StateFile     string        `json:"state_file,omitempty"`
 	TLSCertFile   string        `json:"tls_cert_file"`
 	TLSKeyFile    string        `json:"tls_key_file"`
 	AllowInsecure bool          `json:"allow_insecure"`

@@ -32,6 +32,7 @@ type Server struct {
 	controlListener net.Listener
 	publicListeners map[string]net.Listener
 	publicRoutes    map[string]config.PortMapping
+	stateStore      *registrationStore
 
 	httpServer *http.Server
 
@@ -84,6 +85,16 @@ func NewServer(cfg config.RelayConfig) (*Server, error) {
 		publicRoutes:    publicRoutes,
 		sessions:        make(map[string]*session),
 	}
+
+	stateStore, err := newRegistrationStore(cfg.StateFile, cfg.Agents)
+	if err != nil {
+		_ = controlListener.Close()
+		for _, open := range publicListeners {
+			_ = open.Close()
+		}
+		return nil, err
+	}
+	s.stateStore = stateStore
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(controlPath, s.handleControl)
@@ -166,8 +177,14 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close()
 		return
 	}
+	if err := s.stateStore.markActive(sess.agentID, sess.targets); err != nil {
+		s.clearSession(sess)
+		sess.close()
+		return
+	}
 	if err := sess.write(protocol.Frame{Type: protocol.FrameRegisterOK}); err != nil {
 		s.clearSession(sess)
+		_ = s.stateStore.markInactive(sess.agentID)
 		sess.close()
 		return
 	}
@@ -177,6 +194,7 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		close(stopHeartbeat)
 		s.clearSession(sess)
+		_ = s.stateStore.markInactive(sess.agentID)
 		sess.close()
 		log.Printf("gotunneld: agent %s session closed", sess.agentID)
 	}()
@@ -411,6 +429,7 @@ func (s *Server) closeSession() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for agentID, sess := range s.sessions {
+		_ = s.stateStore.markInactive(agentID)
 		sess.close()
 		delete(s.sessions, agentID)
 	}
