@@ -114,6 +114,24 @@ ssh -p 2222 your-user@your-vps
 
 For local development only, you can set `allow_insecure: true` in both configs and use `ws://.../connect` instead of `wss://.../connect`.
 
+## Inspect relay registration status
+
+If `state_file` is configured, `gotunneld` can print the persisted named-agent registration state without starting the relay server:
+
+```bash
+./gotunneld -config /path/to/relay.json -status
+```
+
+Example output shape:
+
+```text
+home-mac	active	targets=ssh,web	last_connected=2026-04-21T13:00:00Z	last_disconnected=-
+office-pc	inactive	targets=rdp	last_connected=2026-04-21T12:00:00Z	last_disconnected=2026-04-21T13:00:00Z
+lab-mini	never_connected	targets=-	last_connected=-	last_disconnected=-
+```
+
+This command is read-only. It prints the persisted last-known registration state from the relay-owned state file and does not create, edit, or delete relay registrations, credentials, or port mappings.
+
 ## macOS launchd management
 
 For a persistent local agent on macOS, prefer a per-user `LaunchAgent` over an ad hoc background shell process.
