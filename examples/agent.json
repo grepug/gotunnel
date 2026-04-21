@@ -1,7 +1,7 @@
 {
   "relay_url": "wss://example.com/connect",
   "agent_id": "home-mac",
-  "auth_token": "replace-me",
+  "auth_token": "replace-me-home-mac",
   "targets": [
     {
       "name": "ssh",

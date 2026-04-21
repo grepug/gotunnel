@@ -110,7 +110,7 @@ func (c *Client) runOnce(ctx context.Context) error {
 	go sess.heartbeat(stopHeartbeat)
 	defer close(stopHeartbeat)
 
-	authPayload, _ := json.Marshal(protocol.AuthRequest{Token: c.cfg.AuthToken})
+	authPayload, _ := json.Marshal(protocol.AuthRequest{AgentID: c.agentID, Token: c.cfg.AuthToken})
 	if err := sess.write(protocol.Frame{Type: protocol.FrameAuth, Payload: authPayload}); err != nil {
 		return err
 	}

@@ -199,7 +199,7 @@ func (s *Server) authenticate(conn *websocket.Conn) (*session, error) {
 	if err := json.Unmarshal(authFrame.Payload, &auth); err != nil {
 		return nil, err
 	}
-	if !s.isAllowedToken(auth.Token) {
+	if !s.isAllowedAgentToken(auth.AgentID, auth.Token) {
 		_ = writeFrame(conn, protocol.Frame{Type: protocol.FrameError, Payload: []byte("unauthorized")})
 		return nil, errors.New("unauthorized")
 	}
@@ -219,6 +219,10 @@ func (s *Server) authenticate(conn *websocket.Conn) (*session, error) {
 	var register protocol.RegisterRequest
 	if err := json.Unmarshal(registerFrame.Payload, &register); err != nil {
 		return nil, err
+	}
+	if register.AgentID != auth.AgentID {
+		_ = writeFrame(conn, protocol.Frame{Type: protocol.FrameError, Payload: []byte("unauthorized")})
+		return nil, errors.New("unauthorized")
 	}
 
 	targets := make(map[string]struct{}, len(register.Targets))
@@ -350,9 +354,9 @@ func (s *Server) handlePublicConn(ctx context.Context, route config.PortMapping,
 	}
 }
 
-func (s *Server) isAllowedToken(token string) bool {
-	for _, candidate := range s.cfg.AuthTokens {
-		if token == candidate {
+func (s *Server) isAllowedAgentToken(agentID, token string) bool {
+	for _, candidate := range s.cfg.Agents {
+		if candidate.AgentID == agentID && candidate.AuthToken == token {
 			return true
 		}
 	}

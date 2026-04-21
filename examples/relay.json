@@ -1,7 +1,14 @@
 {
   "control_addr": "0.0.0.0:443",
-  "auth_tokens": [
-    "replace-me"
+  "agents": [
+    {
+      "agent_id": "home-mac",
+      "auth_token": "replace-me-home-mac"
+    },
+    {
+      "agent_id": "office-pc",
+      "auth_token": "replace-me-office-pc"
+    }
   ],
   "tls_cert_file": "/etc/letsencrypt/live/example.com/fullchain.pem",
   "tls_key_file": "/etc/letsencrypt/live/example.com/privkey.pem",

@@ -24,7 +24,7 @@ func TestTunnelForwardsTCPTraffic(t *testing.T) {
 
 	relayCfg := config.RelayConfig{
 		ControlAddr:   "127.0.0.1:0",
-		AuthTokens:    []string{"secret"},
+		Agents:        []config.AgentAuth{{AgentID: "mac-mini", AuthToken: "secret"}},
 		AllowInsecure: true,
 		Ports: []config.PortMapping{
 			{
@@ -105,7 +105,7 @@ func TestTunnelReconnectsAfterRelayRestart(t *testing.T) {
 
 	relayCfg := config.RelayConfig{
 		ControlAddr:   controlAddr,
-		AuthTokens:    []string{"secret"},
+		Agents:        []config.AgentAuth{{AgentID: "mac-mini", AuthToken: "secret"}},
 		AllowInsecure: true,
 		Ports: []config.PortMapping{
 			{
@@ -182,7 +182,7 @@ func TestTunnelFailsFastWhenTargetIsUnavailable(t *testing.T) {
 
 	relayCfg := config.RelayConfig{
 		ControlAddr:   "127.0.0.1:0",
-		AuthTokens:    []string{"secret"},
+		Agents:        []config.AgentAuth{{AgentID: "mac-mini", AuthToken: "secret"}},
 		AllowInsecure: true,
 		Ports: []config.PortMapping{
 			{
@@ -255,7 +255,7 @@ func TestTunnelForwardsMultiplePublicPorts(t *testing.T) {
 
 	relayCfg := config.RelayConfig{
 		ControlAddr:   "127.0.0.1:0",
-		AuthTokens:    []string{"secret"},
+		Agents:        []config.AgentAuth{{AgentID: "mac-mini", AuthToken: "secret"}},
 		AllowInsecure: true,
 		Ports: []config.PortMapping{
 			{Name: "ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
@@ -307,8 +307,11 @@ func TestTunnelRoutesOverlappingTargetNamesToTheConfiguredAgent(t *testing.T) {
 	defer cancel()
 
 	relayCfg := config.RelayConfig{
-		ControlAddr:   "127.0.0.1:0",
-		AuthTokens:    []string{"secret"},
+		ControlAddr: "127.0.0.1:0",
+		Agents: []config.AgentAuth{
+			{AgentID: "mac-mini", AuthToken: "secret"},
+			{AgentID: "office-pc", AuthToken: "office-secret"},
+		},
 		AllowInsecure: true,
 		Ports: []config.PortMapping{
 			{Name: "mac-ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
@@ -343,7 +346,7 @@ func TestTunnelRoutesOverlappingTargetNamesToTheConfiguredAgent(t *testing.T) {
 	officeClient, err := agent.NewClient(config.AgentConfig{
 		RelayURL:      relayServer.ControlURL(),
 		AgentID:       "office-pc",
-		AuthToken:     "secret",
+		AuthToken:     "office-secret",
 		AllowInsecure: true,
 		Targets: []config.TargetMapping{
 			{Name: "ssh", LocalAddr: startTaggedEchoServer(t, "office:")},
@@ -376,7 +379,7 @@ func TestTunnelRejectsDuplicateActiveAgentID(t *testing.T) {
 
 	relayCfg := config.RelayConfig{
 		ControlAddr:   "127.0.0.1:0",
-		AuthTokens:    []string{"secret"},
+		Agents:        []config.AgentAuth{{AgentID: "mac-mini", AuthToken: "secret"}},
 		AllowInsecure: true,
 		Ports: []config.PortMapping{
 			{Name: "ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
@@ -447,6 +450,175 @@ func TestTunnelRejectsDuplicateActiveAgentID(t *testing.T) {
 	}
 
 	assertTunnelReply(t, publicAddr, "ping", "first:ping")
+}
+
+func TestTunnelRejectsWrongCredentialForNamedAgent(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	relayCfg := config.RelayConfig{
+		ControlAddr: "127.0.0.1:0",
+		Agents: []config.AgentAuth{
+			{AgentID: "mac-mini", AuthToken: "secret"},
+		},
+		AllowInsecure: true,
+		Ports: []config.PortMapping{
+			{Name: "ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
+		},
+	}
+
+	relayServer, err := relay.NewServer(relayCfg)
+	if err != nil {
+		t.Fatalf("new relay server: %v", err)
+	}
+
+	go func() {
+		if err := relayServer.Start(ctx); err != nil && ctx.Err() == nil {
+			t.Errorf("relay start: %v", err)
+		}
+	}()
+
+	badClient, err := agent.NewClient(config.AgentConfig{
+		RelayURL:      relayServer.ControlURL(),
+		AgentID:       "mac-mini",
+		AuthToken:     "wrong-secret",
+		AllowInsecure: true,
+		Targets: []config.TargetMapping{
+			{Name: "ssh", LocalAddr: startTaggedEchoServer(t, "bad:")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new bad agent client: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- badClient.Start(ctx)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil || !strings.Contains(err.Error(), "unauthorized") {
+			t.Fatalf("expected unauthorized error, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("wrong-credential agent was not rejected in time")
+	}
+}
+
+func TestTunnelRejectsUnknownNamedAgent(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	relayCfg := config.RelayConfig{
+		ControlAddr: "127.0.0.1:0",
+		Agents: []config.AgentAuth{
+			{AgentID: "mac-mini", AuthToken: "secret"},
+		},
+		AllowInsecure: true,
+		Ports: []config.PortMapping{
+			{Name: "ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
+		},
+	}
+
+	relayServer, err := relay.NewServer(relayCfg)
+	if err != nil {
+		t.Fatalf("new relay server: %v", err)
+	}
+
+	go func() {
+		if err := relayServer.Start(ctx); err != nil && ctx.Err() == nil {
+			t.Errorf("relay start: %v", err)
+		}
+	}()
+
+	unknownClient, err := agent.NewClient(config.AgentConfig{
+		RelayURL:      relayServer.ControlURL(),
+		AgentID:       "unknown-agent",
+		AuthToken:     "secret",
+		AllowInsecure: true,
+		Targets: []config.TargetMapping{
+			{Name: "ssh", LocalAddr: startTaggedEchoServer(t, "bad:")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new unknown agent client: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- unknownClient.Start(ctx)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil || !strings.Contains(err.Error(), "unauthorized") {
+			t.Fatalf("expected unauthorized error, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("unknown agent was not rejected in time")
+	}
+}
+
+func TestTunnelRejectsCredentialForDifferentNamedAgent(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	relayCfg := config.RelayConfig{
+		ControlAddr: "127.0.0.1:0",
+		Agents: []config.AgentAuth{
+			{AgentID: "mac-mini", AuthToken: "secret"},
+			{AgentID: "office-pc", AuthToken: "office-secret"},
+		},
+		AllowInsecure: true,
+		Ports: []config.PortMapping{
+			{Name: "ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
+		},
+	}
+
+	relayServer, err := relay.NewServer(relayCfg)
+	if err != nil {
+		t.Fatalf("new relay server: %v", err)
+	}
+
+	go func() {
+		if err := relayServer.Start(ctx); err != nil && ctx.Err() == nil {
+			t.Errorf("relay start: %v", err)
+		}
+	}()
+
+	wrongAgentClient, err := agent.NewClient(config.AgentConfig{
+		RelayURL:      relayServer.ControlURL(),
+		AgentID:       "mac-mini",
+		AuthToken:     "office-secret",
+		AllowInsecure: true,
+		Targets: []config.TargetMapping{
+			{Name: "ssh", LocalAddr: startTaggedEchoServer(t, "bad:")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new wrong-agent client: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- wrongAgentClient.Start(ctx)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil || !strings.Contains(err.Error(), "unauthorized") {
+			t.Fatalf("expected unauthorized error, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("wrong-agent credential was not rejected in time")
+	}
 }
 
 func startEchoServer(t *testing.T) string {
