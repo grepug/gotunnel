@@ -125,12 +125,14 @@ If `state_file` is configured, `gotunneld` can print the persisted named-agent r
 Example output shape:
 
 ```text
-home-mac	active	targets=ssh,web	last_connected=2026-04-21T13:00:00Z	last_disconnected=-
+home-mac	inactive	targets=ssh,web	last_connected=2026-04-21T13:00:00Z	last_disconnected=-
 office-pc	inactive	targets=rdp	last_connected=2026-04-21T12:00:00Z	last_disconnected=2026-04-21T13:00:00Z
 lab-mini	never_connected	targets=-	last_connected=-	last_disconnected=-
 ```
 
 This command is read-only. It prints the persisted last-known registration state from the relay-owned state file and does not create, edit, or delete relay registrations, credentials, or port mappings.
+
+Because `-status` does not coordinate with a live relay runtime, it renders persisted `active` records conservatively as offline `inactive` while preserving the last-known targets and connect timestamps.
 
 ## macOS launchd management
 

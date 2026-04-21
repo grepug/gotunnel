@@ -31,7 +31,7 @@ func TestRenderStatusReportShowsNeverConnectedAgentWhenStateFileIsMissing(t *tes
 	}
 }
 
-func TestRenderStatusReportShowsActiveAndInactiveAgents(t *testing.T) {
+func TestRenderStatusReportNormalizesOfflineActiveAgentWithoutMutatingState(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "relay-state.json")
 	now := time.Date(2026, 4, 21, 13, 0, 0, 0, time.UTC)
 	state := map[string]any{
@@ -58,6 +58,7 @@ func TestRenderStatusReportShowsActiveAndInactiveAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal state: %v", err)
 	}
+	original := append([]byte(nil), raw...)
 	if err := os.WriteFile(statePath, raw, 0o600); err != nil {
 		t.Fatalf("write state file: %v", err)
 	}
@@ -76,10 +77,21 @@ func TestRenderStatusReportShowsActiveAndInactiveAgents(t *testing.T) {
 	}
 
 	text := out.String()
-	for _, want := range []string{"mac-mini", "active", "ssh,web", "office-pc", "inactive", "rdp"} {
+	for _, want := range []string{"mac-mini", "inactive", "ssh,web", "office-pc", "rdp"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q in status output: %s", want, text)
 		}
+	}
+	if strings.Contains(text, "\tactive\t") {
+		t.Fatalf("expected offline status to avoid active records: %s", text)
+	}
+
+	persistedAfter, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state file after status render: %v", err)
+	}
+	if !bytes.Equal(persistedAfter, original) {
+		t.Fatalf("status render mutated state file: before=%s after=%s", string(original), string(persistedAfter))
 	}
 }
 
