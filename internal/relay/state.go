@@ -78,9 +78,16 @@ func LoadAgentStatuses(path string, agents []config.AgentAuth) ([]AgentStatus, e
 	statuses := make([]AgentStatus, 0, len(ids))
 	for _, agentID := range ids {
 		record := state.Agents[agentID]
+		status := record.Status
+		if status == registrationStatusActive {
+			status = registrationStatusInactive
+		}
+		if record.AgentID == "" {
+			record.AgentID = agentID
+		}
 		statuses = append(statuses, AgentStatus{
 			AgentID:            record.AgentID,
-			Status:             record.Status,
+			Status:             status,
 			LastKnownTargets:   append([]string(nil), record.LastKnownTargets...),
 			LastConnectedAt:    record.LastConnectedAt,
 			LastDisconnectedAt: record.LastDisconnectedAt,
