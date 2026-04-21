@@ -64,6 +64,16 @@ Place it at:
 /etc/letsencrypt/renewal-hooks/deploy/gotunneld-restart.sh
 ```
 
+If the host already uses port `80` for another ingress layer, standalone renewal also needs a way to free that port temporarily. On the live Ubuntu deployment used for `gotunnel`, Certbot renewal is paired with pre/post hooks that pause and then restore the existing k3s ingress controller around renewal.
+
+That pattern looks like:
+
+- pre-hook: stop or unschedule the process currently bound to `:80`
+- renewal: `certbot renew`
+- post-hook: restore the ingress process after renewal completes
+
+The important operational rule is simple: renewal must have a deterministic way to claim port `80`, or automatic renewal will silently fail later even if the first certificate issuance succeeded.
+
 ## Build
 
 ```bash
