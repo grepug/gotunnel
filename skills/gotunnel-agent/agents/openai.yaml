@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gotunnel Agent"
+  short_description: "Operate gotunnel through its local CLI."
+  default_prompt: "Use the gotunnel CLI to initialize local config, set relay/auth, add targets, inspect config, and run the local tunnel."
