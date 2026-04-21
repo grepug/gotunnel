@@ -17,6 +17,17 @@ func LoadRelayConfig(path string) (RelayConfig, error) {
 	return cfg, nil
 }
 
+func LoadRelayStatusConfig(path string) (RelayConfig, error) {
+	var cfg RelayConfig
+	if err := loadJSON(path, &cfg); err != nil {
+		return RelayConfig{}, err
+	}
+	if err := cfg.ValidateStatusMode(); err != nil {
+		return RelayConfig{}, err
+	}
+	return cfg, nil
+}
+
 func LoadAgentConfig(path string) (AgentConfig, error) {
 	var cfg AgentConfig
 	if err := loadJSON(path, &cfg); err != nil {

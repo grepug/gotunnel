@@ -49,9 +49,6 @@ func (c RelayConfig) Validate() error {
 	if _, err := net.ResolveTCPAddr("tcp", c.ControlAddr); err != nil {
 		return fmt.Errorf("invalid control address: %w", err)
 	}
-	if len(c.Agents) == 0 {
-		return errors.New("at least one agent credential is required")
-	}
 	if (c.TLSCertFile == "") != (c.TLSKeyFile == "") {
 		return errors.New("tls_cert_file and tls_key_file must be set together")
 	}
@@ -62,18 +59,13 @@ func (c RelayConfig) Validate() error {
 		return errors.New("at least one port mapping is required")
 	}
 
+	if err := c.validateAgentAuths(); err != nil {
+		return err
+	}
+
 	knownAgents := make(map[string]struct{}, len(c.Agents))
 	for _, agent := range c.Agents {
-		if agent.AgentID == "" {
-			return errors.New("agent_id is required for relay agent credentials")
-		}
-		if _, exists := knownAgents[agent.AgentID]; exists {
-			return fmt.Errorf("duplicate relay agent id: %s", agent.AgentID)
-		}
 		knownAgents[agent.AgentID] = struct{}{}
-		if agent.AuthToken == "" {
-			return fmt.Errorf("auth_token is required for relay agent %s", agent.AgentID)
-		}
 	}
 
 	seen := make(map[string]struct{}, len(c.Ports))
@@ -100,6 +92,32 @@ func (c RelayConfig) Validate() error {
 		}
 		if port.TargetName == "" {
 			return fmt.Errorf("target_name is required for port mapping %s", port.Name)
+		}
+	}
+
+	return nil
+}
+
+func (c RelayConfig) ValidateStatusMode() error {
+	return c.validateAgentAuths()
+}
+
+func (c RelayConfig) validateAgentAuths() error {
+	if len(c.Agents) == 0 {
+		return errors.New("at least one agent credential is required")
+	}
+
+	knownAgents := make(map[string]struct{}, len(c.Agents))
+	for _, agent := range c.Agents {
+		if agent.AgentID == "" {
+			return errors.New("agent_id is required for relay agent credentials")
+		}
+		if _, exists := knownAgents[agent.AgentID]; exists {
+			return fmt.Errorf("duplicate relay agent id: %s", agent.AgentID)
+		}
+		knownAgents[agent.AgentID] = struct{}{}
+		if agent.AuthToken == "" {
+			return fmt.Errorf("auth_token is required for relay agent %s", agent.AgentID)
 		}
 	}
 

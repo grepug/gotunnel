@@ -40,6 +40,56 @@ type persistedAgentRecord struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+type AgentStatus struct {
+	AgentID            string
+	Status             string
+	LastKnownTargets   []string
+	LastConnectedAt    time.Time
+	LastDisconnectedAt time.Time
+	UpdatedAt          time.Time
+}
+
+func LoadAgentStatuses(path string, agents []config.AgentAuth) ([]AgentStatus, error) {
+	state, err := loadPersistedRelayState(path)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	if state.Agents == nil {
+		state.Agents = make(map[string]persistedAgentRecord)
+	}
+	for _, agent := range agents {
+		if _, ok := state.Agents[agent.AgentID]; !ok {
+			state.Agents[agent.AgentID] = persistedAgentRecord{
+				AgentID:   agent.AgentID,
+				Status:    registrationStatusNever,
+				UpdatedAt: now,
+			}
+		}
+	}
+
+	ids := make([]string, 0, len(state.Agents))
+	for agentID := range state.Agents {
+		ids = append(ids, agentID)
+	}
+	sort.Strings(ids)
+
+	statuses := make([]AgentStatus, 0, len(ids))
+	for _, agentID := range ids {
+		record := state.Agents[agentID]
+		statuses = append(statuses, AgentStatus{
+			AgentID:            record.AgentID,
+			Status:             record.Status,
+			LastKnownTargets:   append([]string(nil), record.LastKnownTargets...),
+			LastConnectedAt:    record.LastConnectedAt,
+			LastDisconnectedAt: record.LastDisconnectedAt,
+			UpdatedAt:          record.UpdatedAt,
+		})
+	}
+	return statuses, nil
+}
+
 func newRegistrationStore(path string, agents []config.AgentAuth) (*registrationStore, error) {
 	store := &registrationStore{
 		path: path,
@@ -50,17 +100,11 @@ func newRegistrationStore(path string, agents []config.AgentAuth) (*registration
 	}
 
 	if path != "" {
-		raw, err := os.ReadFile(path)
-		if err == nil {
-			if err := json.Unmarshal(raw, &store.state); err != nil {
-				return nil, err
-			}
-			if store.state.Agents == nil {
-				store.state.Agents = make(map[string]persistedAgentRecord)
-			}
-		} else if !errors.Is(err, os.ErrNotExist) {
+		state, err := loadPersistedRelayState(path)
+		if err != nil {
 			return nil, err
 		}
+		store.state = state
 	}
 
 	now := time.Now().UTC()
@@ -92,6 +136,31 @@ func newRegistrationStore(path string, agents []config.AgentAuth) (*registration
 	}
 
 	return store, nil
+}
+
+func loadPersistedRelayState(path string) (persistedRelayState, error) {
+	state := persistedRelayState{
+		Version: registrationStateVersion,
+		Agents:  make(map[string]persistedAgentRecord),
+	}
+	if path == "" {
+		return state, nil
+	}
+
+	raw, err := os.ReadFile(path)
+	if err == nil {
+		if err := json.Unmarshal(raw, &state); err != nil {
+			return persistedRelayState{}, err
+		}
+		if state.Agents == nil {
+			state.Agents = make(map[string]persistedAgentRecord)
+		}
+		return state, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return state, nil
+	}
+	return persistedRelayState{}, err
 }
 
 func (s *registrationStore) markActive(agentID string, targets map[string]struct{}) error {
