@@ -1,5 +1,5 @@
 {
-  "relay_url": "wss://example.com/connect",
+  "relay_url": "wss://example.com:18443/connect",
   "agent_id": "home-mac",
   "auth_token": "replace-me-home-mac",
   "targets": [
@@ -12,8 +12,8 @@
       "local_addr": "127.0.0.1:3000"
     },
     {
-      "name": "rdp",
-      "local_addr": "127.0.0.1:3389"
+      "name": "desktop",
+      "local_addr": "127.0.0.1:5900"
     }
   ]
 }
