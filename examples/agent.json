@@ -1,0 +1,18 @@
+{
+  "relay_url": "wss://example.com/connect",
+  "auth_token": "replace-me",
+  "targets": [
+    {
+      "name": "ssh",
+      "local_addr": "127.0.0.1:22"
+    },
+    {
+      "name": "web",
+      "local_addr": "127.0.0.1:3000"
+    },
+    {
+      "name": "rdp",
+      "local_addr": "127.0.0.1:3389"
+    }
+  ]
+}

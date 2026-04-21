@@ -1,0 +1,22 @@
+{
+  "control_addr": "0.0.0.0:443",
+  "auth_tokens": [
+    "replace-me"
+  ],
+  "tls_cert_file": "/etc/letsencrypt/live/example.com/fullchain.pem",
+  "tls_key_file": "/etc/letsencrypt/live/example.com/privkey.pem",
+  "ports": [
+    {
+      "name": "ssh",
+      "listen_addr": "0.0.0.0:2222"
+    },
+    {
+      "name": "web",
+      "listen_addr": "0.0.0.0:8080"
+    },
+    {
+      "name": "rdp",
+      "listen_addr": "0.0.0.0:3389"
+    }
+  ]
+}
