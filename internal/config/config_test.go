@@ -11,7 +11,7 @@ import (
 func TestRelayConfigValidateAcceptsMinimalValidConfig(t *testing.T) {
 	cfg := config.RelayConfig{
 		ControlAddr:   "127.0.0.1:0",
-		AuthTokens:    []string{"secret"},
+		Agents:        []config.AgentAuth{{AgentID: "mac-mini", AuthToken: "secret"}},
 		AllowInsecure: true,
 		Ports: []config.PortMapping{
 			{
@@ -30,8 +30,11 @@ func TestRelayConfigValidateAcceptsMinimalValidConfig(t *testing.T) {
 
 func TestRelayConfigValidateRejectsDuplicatePortNames(t *testing.T) {
 	cfg := config.RelayConfig{
-		ControlAddr:   "127.0.0.1:0",
-		AuthTokens:    []string{"secret"},
+		ControlAddr: "127.0.0.1:0",
+		Agents: []config.AgentAuth{
+			{AgentID: "mac-mini", AuthToken: "secret"},
+			{AgentID: "office-pc", AuthToken: "office-secret"},
+		},
 		AllowInsecure: true,
 		Ports: []config.PortMapping{
 			{Name: "ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
@@ -79,7 +82,7 @@ func TestAgentConfigValidateRejectsPlainWSByDefault(t *testing.T) {
 func TestRelayConfigValidateRejectsPartialTLSConfig(t *testing.T) {
 	cfg := config.RelayConfig{
 		ControlAddr: "127.0.0.1:0",
-		AuthTokens:  []string{"secret"},
+		Agents:      []config.AgentAuth{{AgentID: "mac-mini", AuthToken: "secret"}},
 		TLSCertFile: "/tmp/cert.pem",
 		Ports: []config.PortMapping{
 			{Name: "ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
@@ -95,7 +98,9 @@ func TestLoadRelayConfigFromJSONFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "relay.json")
 	content := `{
 		"control_addr": "127.0.0.1:0",
-		"auth_tokens": ["secret"],
+		"agents": [
+			{"agent_id": "mac-mini", "auth_token": "secret"}
+		],
 		"allow_insecure": true,
 		"ports": [
 			{"name": "ssh", "listen_addr": "127.0.0.1:0", "agent_id": "mac-mini", "target_name": "ssh"}
@@ -169,7 +174,7 @@ func TestAgentConfigValidateRejectsMissingAgentID(t *testing.T) {
 func TestRelayConfigValidateRejectsMissingPortRouteFields(t *testing.T) {
 	cfg := config.RelayConfig{
 		ControlAddr:   "127.0.0.1:0",
-		AuthTokens:    []string{"secret"},
+		Agents:        []config.AgentAuth{{AgentID: "mac-mini", AuthToken: "secret"}},
 		AllowInsecure: true,
 		Ports: []config.PortMapping{
 			{Name: "ssh", ListenAddr: "127.0.0.1:0"},
@@ -178,5 +183,37 @@ func TestRelayConfigValidateRejectsMissingPortRouteFields(t *testing.T) {
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected missing port route fields to fail validation")
+	}
+}
+
+func TestRelayConfigValidateRejectsMissingAgents(t *testing.T) {
+	cfg := config.RelayConfig{
+		ControlAddr:   "127.0.0.1:0",
+		AllowInsecure: true,
+		Ports: []config.PortMapping{
+			{Name: "ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected missing agents to fail validation")
+	}
+}
+
+func TestRelayConfigValidateRejectsDuplicateAgentIDs(t *testing.T) {
+	cfg := config.RelayConfig{
+		ControlAddr: "127.0.0.1:0",
+		Agents: []config.AgentAuth{
+			{AgentID: "mac-mini", AuthToken: "secret"},
+			{AgentID: "mac-mini", AuthToken: "other-secret"},
+		},
+		AllowInsecure: true,
+		Ports: []config.PortMapping{
+			{Name: "ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected duplicate agent ids to fail validation")
 	}
 }

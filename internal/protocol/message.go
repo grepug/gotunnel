@@ -1,7 +1,8 @@
 package protocol
 
 type AuthRequest struct {
-	Token string `json:"token"`
+	AgentID string `json:"agent_id"`
+	Token   string `json:"token"`
 }
 
 type RegisterRequest struct {

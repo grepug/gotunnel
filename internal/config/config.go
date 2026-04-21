@@ -9,11 +9,16 @@ import (
 
 type RelayConfig struct {
 	ControlAddr   string        `json:"control_addr"`
-	AuthTokens    []string      `json:"auth_tokens"`
+	Agents        []AgentAuth   `json:"agents"`
 	TLSCertFile   string        `json:"tls_cert_file"`
 	TLSKeyFile    string        `json:"tls_key_file"`
 	AllowInsecure bool          `json:"allow_insecure"`
 	Ports         []PortMapping `json:"ports"`
+}
+
+type AgentAuth struct {
+	AgentID   string `json:"agent_id"`
+	AuthToken string `json:"auth_token"`
 }
 
 type PortMapping struct {
@@ -43,8 +48,8 @@ func (c RelayConfig) Validate() error {
 	if _, err := net.ResolveTCPAddr("tcp", c.ControlAddr); err != nil {
 		return fmt.Errorf("invalid control address: %w", err)
 	}
-	if len(c.AuthTokens) == 0 {
-		return errors.New("at least one auth token is required")
+	if len(c.Agents) == 0 {
+		return errors.New("at least one agent credential is required")
 	}
 	if (c.TLSCertFile == "") != (c.TLSKeyFile == "") {
 		return errors.New("tls_cert_file and tls_key_file must be set together")
@@ -54,6 +59,20 @@ func (c RelayConfig) Validate() error {
 	}
 	if len(c.Ports) == 0 {
 		return errors.New("at least one port mapping is required")
+	}
+
+	knownAgents := make(map[string]struct{}, len(c.Agents))
+	for _, agent := range c.Agents {
+		if agent.AgentID == "" {
+			return errors.New("agent_id is required for relay agent credentials")
+		}
+		if _, exists := knownAgents[agent.AgentID]; exists {
+			return fmt.Errorf("duplicate relay agent id: %s", agent.AgentID)
+		}
+		knownAgents[agent.AgentID] = struct{}{}
+		if agent.AuthToken == "" {
+			return fmt.Errorf("auth_token is required for relay agent %s", agent.AgentID)
+		}
 	}
 
 	seen := make(map[string]struct{}, len(c.Ports))
@@ -74,6 +93,9 @@ func (c RelayConfig) Validate() error {
 		}
 		if port.AgentID == "" {
 			return fmt.Errorf("agent_id is required for port mapping %s", port.Name)
+		}
+		if _, ok := knownAgents[port.AgentID]; !ok {
+			return fmt.Errorf("unknown agent_id %s for port mapping %s", port.AgentID, port.Name)
 		}
 		if port.TargetName == "" {
 			return fmt.Errorf("target_name is required for port mapping %s", port.Name)

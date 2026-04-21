@@ -83,7 +83,7 @@ go build ./cmd/gotunnel ./cmd/gotunneld
 
 ## Quick start
 
-1. Copy the example configs and replace the token and agent IDs.
+1. Copy the example configs and replace the per-agent credentials and agent IDs.
 2. For a real deployment, point the relay config at your TLS certificate and key and use a `wss://` relay URL in the agent config.
 3. Start the relay on the VPS:
 
@@ -179,7 +179,9 @@ Example: [examples/relay.json](/Users/kai/Developer/utils/gotunnel/examples/rela
 Fields:
 
 - `control_addr`: relay control listener
-- `auth_tokens`: accepted agent tokens
+- `agents`: relay-side credentials for each named agent
+- `agents[].agent_id`: named agent that is allowed to connect
+- `agents[].auth_token`: credential accepted only for that named agent
 - `tls_cert_file`: certificate for the control connection
 - `tls_key_file`: private key for the control connection
 - `allow_insecure`: only for local testing; allows plain `ws://`
@@ -196,7 +198,7 @@ Fields:
 
 - `relay_url`: `wss://.../connect` in normal use
 - `agent_id`: stable identity for this local machine or agent instance
-- `auth_token`: shared token that must match the relay config
+- `auth_token`: credential that must match the relay entry for this exact `agent_id`
 - `allow_insecure`: only for local testing with `ws://`
 - `targets`: local services reachable through the tunnel
 
@@ -218,5 +220,6 @@ Different agents can expose the same target name, such as `ssh`, as long as each
 - no multi-agent failover
 - no persistent control-plane state yet
 - no management API for dynamically registering or editing agents
+- no persisted control-plane registrations yet
 
 Those are deliberate `A`-phase omissions so the transport core can stay small and reliable first.
