@@ -10,6 +10,7 @@
       "auth_token": "replace-me-office-pc"
     }
   ],
+  "state_file": "/var/lib/gotunnel/relay-state.json",
   "tls_cert_file": "/etc/letsencrypt/live/example.com/fullchain.pem",
   "tls_key_file": "/etc/letsencrypt/live/example.com/privkey.pem",
   "ports": [

@@ -101,6 +101,7 @@ func TestLoadRelayConfigFromJSONFile(t *testing.T) {
 		"agents": [
 			{"agent_id": "mac-mini", "auth_token": "secret"}
 		],
+		"state_file": "/tmp/relay-state.json",
 		"allow_insecure": true,
 		"ports": [
 			{"name": "ssh", "listen_addr": "127.0.0.1:0", "agent_id": "mac-mini", "target_name": "ssh"}
@@ -118,6 +119,9 @@ func TestLoadRelayConfigFromJSONFile(t *testing.T) {
 
 	if cfg.ControlAddr != "127.0.0.1:0" {
 		t.Fatalf("unexpected control addr: %s", cfg.ControlAddr)
+	}
+	if cfg.StateFile != "/tmp/relay-state.json" {
+		t.Fatalf("unexpected state file: %s", cfg.StateFile)
 	}
 	if len(cfg.Ports) != 1 || cfg.Ports[0].Name != "ssh" {
 		t.Fatalf("unexpected ports: %+v", cfg.Ports)
