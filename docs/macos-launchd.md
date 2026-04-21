@@ -9,16 +9,17 @@ Template:
 Recommended layout:
 
 - binary: `~/.local/bin/gotunnel`
-- config: `~/.config/gotunnel/<name>.json`
+- config: `~/.gotunnel/agent.json`
 - plist: `~/Library/LaunchAgents/io.github.grepug.gotunnel.<name>.plist`
 - logs: `~/Library/Logs/gotunnel/<name>.out.log` and `~/Library/Logs/gotunnel/<name>.err.log`
 
 ## Basic Flow
 
-1. Copy the plist template.
-2. Replace the user path, config path, label suffix, and log paths.
-3. Load it with `launchctl bootstrap`.
-4. Use `launchctl print` and the log files for status.
+1. Initialize and populate `~/.gotunnel/agent.json` first with `gotunnel init`, `gotunnel set ...`, and `gotunnel target add ...`.
+2. Copy the plist template.
+3. Replace the user path, label suffix, and log paths if needed.
+4. Load it with `launchctl bootstrap`.
+5. Use `launchctl print` and the log files for status.
 
 Example commands:
 
@@ -59,3 +60,4 @@ launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/io.github.grepug.gotunne
 ```
 
 If you only need one-off testing, you do not need `launchd`. Running `./gotunnel -config /path/to/agent.json` in a shell is enough.
+If you use the default config home, `./gotunnel run` is enough.
