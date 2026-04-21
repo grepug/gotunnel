@@ -25,21 +25,25 @@ const (
 	pingPeriod = 10 * time.Second
 )
 
+const duplicateAgentErrorPrefix = "duplicate active agent id:"
+
 type Server struct {
 	cfg             config.RelayConfig
 	controlListener net.Listener
 	publicListeners map[string]net.Listener
+	publicRoutes    map[string]config.PortMapping
 
 	httpServer *http.Server
 
-	mu      sync.RWMutex
-	session *session
+	mu       sync.RWMutex
+	sessions map[string]*session
 }
 
 type session struct {
 	conn *websocket.Conn
 
 	writerMu sync.Mutex
+	agentID  string
 	targets  map[string]struct{}
 
 	streamMu     sync.RWMutex
@@ -59,6 +63,7 @@ func NewServer(cfg config.RelayConfig) (*Server, error) {
 	}
 
 	publicListeners := make(map[string]net.Listener, len(cfg.Ports))
+	publicRoutes := make(map[string]config.PortMapping, len(cfg.Ports))
 	for _, mapping := range cfg.Ports {
 		ln, err := net.Listen("tcp", mapping.ListenAddr)
 		if err != nil {
@@ -69,12 +74,15 @@ func NewServer(cfg config.RelayConfig) (*Server, error) {
 			return nil, fmt.Errorf("listen public %s: %w", mapping.Name, err)
 		}
 		publicListeners[mapping.Name] = ln
+		publicRoutes[mapping.Name] = mapping
 	}
 
 	s := &Server{
 		cfg:             cfg,
 		controlListener: controlListener,
 		publicListeners: publicListeners,
+		publicRoutes:    publicRoutes,
+		sessions:        make(map[string]*session),
 	}
 
 	mux := http.NewServeMux()
@@ -153,15 +161,24 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.replaceSession(sess)
-	log.Printf("gotunneld: agent connected with %d target(s)", len(sess.targets))
+	if err := s.addSession(sess); err != nil {
+		_ = sess.write(protocol.Frame{Type: protocol.FrameError, Payload: []byte(err.Error())})
+		_ = conn.Close()
+		return
+	}
+	if err := sess.write(protocol.Frame{Type: protocol.FrameRegisterOK}); err != nil {
+		s.clearSession(sess)
+		sess.close()
+		return
+	}
+	log.Printf("gotunneld: agent %s connected with %d target(s)", sess.agentID, len(sess.targets))
 	stopHeartbeat := make(chan struct{})
 	go sess.heartbeat(stopHeartbeat)
 	defer func() {
 		close(stopHeartbeat)
 		s.clearSession(sess)
 		sess.close()
-		log.Printf("gotunneld: agent session closed")
+		log.Printf("gotunneld: agent %s session closed", sess.agentID)
 	}()
 
 	if err := s.readLoop(sess); err != nil && !errors.Is(err, net.ErrClosed) {
@@ -211,6 +228,7 @@ func (s *Server) authenticate(conn *websocket.Conn) (*session, error) {
 
 	return &session{
 		conn:        conn,
+		agentID:     register.AgentID,
 		targets:     targets,
 		streams:     make(map[uint32]net.Conn),
 		openResults: make(map[uint32]chan protocol.OpenResult),
@@ -265,6 +283,7 @@ func (s *Server) readLoop(sess *session) error {
 }
 
 func (s *Server) acceptPublic(ctx context.Context, name string, ln net.Listener) {
+	route := s.publicRoutes[name]
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -273,12 +292,12 @@ func (s *Server) acceptPublic(ctx context.Context, name string, ln net.Listener)
 			}
 			continue
 		}
-		go s.handlePublicConn(ctx, name, conn)
+		go s.handlePublicConn(ctx, route, conn)
 	}
 }
 
-func (s *Server) handlePublicConn(ctx context.Context, name string, publicConn net.Conn) {
-	sess := s.waitForSessionFor(ctx, name, 3*time.Second)
+func (s *Server) handlePublicConn(ctx context.Context, route config.PortMapping, publicConn net.Conn) {
+	sess := s.waitForSessionFor(ctx, route.AgentID, route.TargetName, 3*time.Second)
 	if sess == nil {
 		_ = publicConn.Close()
 		return
@@ -301,7 +320,7 @@ func (s *Server) handlePublicConn(ctx context.Context, name string, publicConn n
 		_ = publicConn.Close()
 	}()
 
-	payload, _ := json.Marshal(protocol.OpenRequest{Target: name})
+	payload, _ := json.Marshal(protocol.OpenRequest{Target: route.TargetName})
 	if err := sess.write(protocol.Frame{Type: protocol.FrameOpen, StreamID: streamID, Payload: payload}); err != nil {
 		return
 	}
@@ -340,39 +359,41 @@ func (s *Server) isAllowedToken(token string) bool {
 	return false
 }
 
-func (s *Server) replaceSession(sess *session) {
+func (s *Server) addSession(sess *session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.session != nil {
-		s.session.close()
+	if _, exists := s.sessions[sess.agentID]; exists {
+		return fmt.Errorf("%s %s", duplicateAgentErrorPrefix, sess.agentID)
 	}
-	s.session = sess
+	s.sessions[sess.agentID] = sess
+	return nil
 }
 
 func (s *Server) clearSession(sess *session) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.session == sess {
-		s.session = nil
+	if current := s.sessions[sess.agentID]; current == sess {
+		delete(s.sessions, sess.agentID)
 	}
 }
 
-func (s *Server) currentSessionFor(name string) *session {
+func (s *Server) currentSessionFor(agentID, targetName string) *session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.session == nil {
+	sess := s.sessions[agentID]
+	if sess == nil {
 		return nil
 	}
-	if _, ok := s.session.targets[name]; !ok {
+	if _, ok := sess.targets[targetName]; !ok {
 		return nil
 	}
-	return s.session
+	return sess
 }
 
-func (s *Server) waitForSessionFor(ctx context.Context, name string, timeout time.Duration) *session {
+func (s *Server) waitForSessionFor(ctx context.Context, agentID, targetName string, timeout time.Duration) *session {
 	deadline := time.Now().Add(timeout)
 	for {
-		if sess := s.currentSessionFor(name); sess != nil {
+		if sess := s.currentSessionFor(agentID, targetName); sess != nil {
 			return sess
 		}
 		if ctx.Err() != nil || time.Now().After(deadline) {
@@ -385,9 +406,9 @@ func (s *Server) waitForSessionFor(ctx context.Context, name string, timeout tim
 func (s *Server) closeSession() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.session != nil {
-		s.session.close()
-		s.session = nil
+	for agentID, sess := range s.sessions {
+		sess.close()
+		delete(s.sessions, agentID)
 	}
 }
 

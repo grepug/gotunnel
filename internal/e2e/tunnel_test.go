@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,8 @@ func TestTunnelForwardsTCPTraffic(t *testing.T) {
 			{
 				Name:       "ssh",
 				ListenAddr: "127.0.0.1:0",
+				AgentID:    "mac-mini",
+				TargetName: "ssh",
 			},
 		},
 	}
@@ -46,6 +49,7 @@ func TestTunnelForwardsTCPTraffic(t *testing.T) {
 
 	agentCfg := config.AgentConfig{
 		RelayURL:      relayServer.ControlURL(),
+		AgentID:       "mac-mini",
 		AuthToken:     "secret",
 		AllowInsecure: true,
 		Targets: []config.TargetMapping{
@@ -107,6 +111,8 @@ func TestTunnelReconnectsAfterRelayRestart(t *testing.T) {
 			{
 				Name:       "ssh",
 				ListenAddr: publicAddr,
+				AgentID:    "mac-mini",
+				TargetName: "ssh",
 			},
 		},
 	}
@@ -125,6 +131,7 @@ func TestTunnelReconnectsAfterRelayRestart(t *testing.T) {
 
 	agentCfg := config.AgentConfig{
 		RelayURL:      relayServer.ControlURL(),
+		AgentID:       "mac-mini",
 		AuthToken:     "secret",
 		AllowInsecure: true,
 		Targets: []config.TargetMapping{
@@ -181,6 +188,8 @@ func TestTunnelFailsFastWhenTargetIsUnavailable(t *testing.T) {
 			{
 				Name:       "ssh",
 				ListenAddr: "127.0.0.1:0",
+				AgentID:    "mac-mini",
+				TargetName: "ssh",
 			},
 		},
 	}
@@ -198,6 +207,7 @@ func TestTunnelFailsFastWhenTargetIsUnavailable(t *testing.T) {
 
 	agentCfg := config.AgentConfig{
 		RelayURL:      relayServer.ControlURL(),
+		AgentID:       "mac-mini",
 		AuthToken:     "secret",
 		AllowInsecure: true,
 		Targets: []config.TargetMapping{
@@ -248,8 +258,8 @@ func TestTunnelForwardsMultiplePublicPorts(t *testing.T) {
 		AuthTokens:    []string{"secret"},
 		AllowInsecure: true,
 		Ports: []config.PortMapping{
-			{Name: "ssh", ListenAddr: "127.0.0.1:0"},
-			{Name: "web", ListenAddr: "127.0.0.1:0"},
+			{Name: "ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
+			{Name: "web", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "web"},
 		},
 	}
 
@@ -266,6 +276,7 @@ func TestTunnelForwardsMultiplePublicPorts(t *testing.T) {
 
 	agentCfg := config.AgentConfig{
 		RelayURL:      relayServer.ControlURL(),
+		AgentID:       "mac-mini",
 		AuthToken:     "secret",
 		AllowInsecure: true,
 		Targets: []config.TargetMapping{
@@ -287,6 +298,155 @@ func TestTunnelForwardsMultiplePublicPorts(t *testing.T) {
 
 	assertTunnelEcho(t, waitForPublicAddr(t, relayServer, "ssh"), "ssh")
 	assertTunnelEcho(t, waitForPublicAddr(t, relayServer, "web"), "web")
+}
+
+func TestTunnelRoutesOverlappingTargetNamesToTheConfiguredAgent(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	relayCfg := config.RelayConfig{
+		ControlAddr:   "127.0.0.1:0",
+		AuthTokens:    []string{"secret"},
+		AllowInsecure: true,
+		Ports: []config.PortMapping{
+			{Name: "mac-ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
+			{Name: "office-ssh", ListenAddr: "127.0.0.1:0", AgentID: "office-pc", TargetName: "ssh"},
+		},
+	}
+
+	relayServer, err := relay.NewServer(relayCfg)
+	if err != nil {
+		t.Fatalf("new relay server: %v", err)
+	}
+
+	go func() {
+		if err := relayServer.Start(ctx); err != nil && ctx.Err() == nil {
+			t.Errorf("relay start: %v", err)
+		}
+	}()
+
+	macClient, err := agent.NewClient(config.AgentConfig{
+		RelayURL:      relayServer.ControlURL(),
+		AgentID:       "mac-mini",
+		AuthToken:     "secret",
+		AllowInsecure: true,
+		Targets: []config.TargetMapping{
+			{Name: "ssh", LocalAddr: startTaggedEchoServer(t, "mac:")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new mac agent client: %v", err)
+	}
+
+	officeClient, err := agent.NewClient(config.AgentConfig{
+		RelayURL:      relayServer.ControlURL(),
+		AgentID:       "office-pc",
+		AuthToken:     "secret",
+		AllowInsecure: true,
+		Targets: []config.TargetMapping{
+			{Name: "ssh", LocalAddr: startTaggedEchoServer(t, "office:")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new office agent client: %v", err)
+	}
+
+	go func() {
+		if err := macClient.Start(ctx); err != nil && ctx.Err() == nil {
+			t.Errorf("mac agent start: %v", err)
+		}
+	}()
+	go func() {
+		if err := officeClient.Start(ctx); err != nil && ctx.Err() == nil {
+			t.Errorf("office agent start: %v", err)
+		}
+	}()
+
+	assertTunnelReply(t, waitForPublicAddr(t, relayServer, "mac-ssh"), "ping", "mac:ping")
+	assertTunnelReply(t, waitForPublicAddr(t, relayServer, "office-ssh"), "ping", "office:ping")
+}
+
+func TestTunnelRejectsDuplicateActiveAgentID(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	relayCfg := config.RelayConfig{
+		ControlAddr:   "127.0.0.1:0",
+		AuthTokens:    []string{"secret"},
+		AllowInsecure: true,
+		Ports: []config.PortMapping{
+			{Name: "ssh", ListenAddr: "127.0.0.1:0", AgentID: "mac-mini", TargetName: "ssh"},
+		},
+	}
+
+	relayServer, err := relay.NewServer(relayCfg)
+	if err != nil {
+		t.Fatalf("new relay server: %v", err)
+	}
+
+	go func() {
+		if err := relayServer.Start(ctx); err != nil && ctx.Err() == nil {
+			t.Errorf("relay start: %v", err)
+		}
+	}()
+
+	firstClient, err := agent.NewClient(config.AgentConfig{
+		RelayURL:      relayServer.ControlURL(),
+		AgentID:       "mac-mini",
+		AuthToken:     "secret",
+		AllowInsecure: true,
+		Targets: []config.TargetMapping{
+			{Name: "ssh", LocalAddr: startTaggedEchoServer(t, "first:")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new first agent client: %v", err)
+	}
+
+	go func() {
+		if err := firstClient.Start(ctx); err != nil && ctx.Err() == nil {
+			t.Errorf("first agent start: %v", err)
+		}
+	}()
+
+	publicAddr := waitForPublicAddr(t, relayServer, "ssh")
+	assertTunnelReply(t, publicAddr, "ping", "first:ping")
+
+	duplicateCtx, stopDuplicate := context.WithCancel(ctx)
+	defer stopDuplicate()
+
+	duplicateClient, err := agent.NewClient(config.AgentConfig{
+		RelayURL:      relayServer.ControlURL(),
+		AgentID:       "mac-mini",
+		AuthToken:     "secret",
+		AllowInsecure: true,
+		Targets: []config.TargetMapping{
+			{Name: "ssh", LocalAddr: startTaggedEchoServer(t, "second:")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new duplicate agent client: %v", err)
+	}
+
+	duplicateErrCh := make(chan error, 1)
+	go func() {
+		duplicateErrCh <- duplicateClient.Start(duplicateCtx)
+	}()
+
+	select {
+	case err := <-duplicateErrCh:
+		if err == nil || !strings.Contains(err.Error(), "duplicate active agent id") {
+			t.Fatalf("expected duplicate agent rejection, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("duplicate agent was not rejected in time")
+	}
+
+	assertTunnelReply(t, publicAddr, "ping", "first:ping")
 }
 
 func startEchoServer(t *testing.T) string {
@@ -318,6 +478,43 @@ func startEchoServer(t *testing.T) string {
 	return ln.Addr().String()
 }
 
+func startTaggedEchoServer(t *testing.T, prefix string) string {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen tagged echo: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_ = ln.Close()
+	})
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+
+			go func(c net.Conn) {
+				defer c.Close()
+
+				buf := make([]byte, 1024)
+				n, err := c.Read(buf)
+				if n > 0 {
+					_, _ = c.Write([]byte(prefix + string(buf[:n])))
+				}
+				if err != nil {
+					return
+				}
+			}(conn)
+		}
+	}()
+
+	return ln.Addr().String()
+}
+
 func reserveTCPAddress(t *testing.T) string {
 	t.Helper()
 
@@ -333,6 +530,12 @@ func reserveTCPAddress(t *testing.T) string {
 func assertTunnelEcho(t *testing.T, publicAddr, payload string) {
 	t.Helper()
 
+	assertTunnelReply(t, publicAddr, payload, payload)
+}
+
+func assertTunnelReply(t *testing.T, publicAddr, payload, want string) {
+	t.Helper()
+
 	conn, err := net.DialTimeout("tcp", publicAddr, 2*time.Second)
 	if err != nil {
 		t.Fatalf("dial public addr: %v", err)
@@ -343,13 +546,13 @@ func assertTunnelEcho(t *testing.T, publicAddr, payload string) {
 		t.Fatalf("write public conn: %v", err)
 	}
 
-	reply := make([]byte, len(payload))
+	reply := make([]byte, len(want))
 	if _, err := io.ReadFull(conn, reply); err != nil {
 		t.Fatalf("read public conn: %v", err)
 	}
 
-	if string(reply) != payload {
-		t.Fatalf("unexpected reply: got %q want %q", string(reply), payload)
+	if string(reply) != want {
+		t.Fatalf("unexpected reply: got %q want %q", string(reply), want)
 	}
 }
 

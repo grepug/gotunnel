@@ -11,6 +11,7 @@ const (
 	FrameAuth FrameType = iota + 1
 	FrameAuthOK
 	FrameRegister
+	FrameRegisterOK
 	FrameOpen
 	FrameOpenResult
 	FrameData

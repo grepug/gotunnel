@@ -12,9 +12,10 @@ Current `v1` focus:
 
 - `cmd/gotunneld`: relay process for the VPS
 - `cmd/gotunnel`: local agent process
-- one persistent control connection from the local machine to the VPS
+- one persistent control connection per local machine to the VPS
 - fixed public TCP ports on the VPS
 - token authentication
+- explicit agent identity in static config
 - automatic reconnect loop
 - encrypted control plane by default
 
@@ -82,7 +83,7 @@ go build ./cmd/gotunnel ./cmd/gotunneld
 
 ## Quick start
 
-1. Copy the example configs and replace the token.
+1. Copy the example configs and replace the token and agent IDs.
 2. For a real deployment, point the relay config at your TLS certificate and key and use a `wss://` relay URL in the agent config.
 3. Start the relay on the VPS:
 
@@ -100,7 +101,8 @@ go build ./cmd/gotunnel ./cmd/gotunneld
 
 Example:
 
-- relay port `2222` named `ssh`
+- relay port `2222` named `ssh` routed to `home-mac:ssh`
+- local agent `home-mac`
 - local target `ssh -> 127.0.0.1:22`
 
 Then:
@@ -182,6 +184,9 @@ Fields:
 - `tls_key_file`: private key for the control connection
 - `allow_insecure`: only for local testing; allows plain `ws://`
 - `ports`: public TCP listeners exposed on the VPS
+- `ports[].name`: public listener name
+- `ports[].agent_id`: which named agent should receive traffic for that listener
+- `ports[].target_name`: which target on that agent should be opened
 
 ## Agent config
 
@@ -190,6 +195,7 @@ Example: [examples/agent.json](/Users/kai/Developer/utils/gotunnel/examples/agen
 Fields:
 
 - `relay_url`: `wss://.../connect` in normal use
+- `agent_id`: stable identity for this local machine or agent instance
 - `auth_token`: shared token that must match the relay config
 - `allow_insecure`: only for local testing with `ws://`
 - `targets`: local services reachable through the tunnel
@@ -198,10 +204,12 @@ Fields:
 
 Example SSH mapping:
 
-- relay port `0.0.0.0:2222` named `ssh`
-- agent target `ssh` mapped to `127.0.0.1:22`
+- relay port `0.0.0.0:2222` named `ssh` routed to agent `home-mac`
+- agent `home-mac` target `ssh` mapped to `127.0.0.1:22`
 
 With both binaries running, connecting to `vps:2222` reaches the local machine's SSH service through the tunnel.
+
+Different agents can expose the same target name, such as `ssh`, as long as each relay port mapping points to the intended `agent_id` explicitly.
 
 ## Current limitations
 
@@ -209,5 +217,6 @@ With both binaries running, connecting to `vps:2222` reaches the local machine's
 - no session preservation across reconnect
 - no multi-agent failover
 - no persistent control-plane state yet
+- no management API for dynamically registering or editing agents
 
 Those are deliberate `A`-phase omissions so the transport core can stay small and reliable first.
