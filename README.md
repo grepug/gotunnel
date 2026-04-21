@@ -26,6 +26,37 @@ Plain `ws://` is only allowed when `allow_insecure` is explicitly set to `true`.
 go build ./cmd/gotunnel ./cmd/gotunneld
 ```
 
+## Quick start
+
+1. Copy the example configs and replace the token.
+2. For a real deployment, point the relay config at your TLS certificate and key and use a `wss://` relay URL in the agent config.
+3. Start the relay on the VPS:
+
+```bash
+./gotunneld -config /path/to/relay.json
+```
+
+4. Start the agent on the local machine:
+
+```bash
+./gotunnel -config /path/to/agent.json
+```
+
+5. Connect to the VPS public port you mapped.
+
+Example:
+
+- relay port `2222` named `ssh`
+- local target `ssh -> 127.0.0.1:22`
+
+Then:
+
+```bash
+ssh -p 2222 your-user@your-vps
+```
+
+For local development only, you can set `allow_insecure: true` in both configs and use `ws://.../connect` instead of `wss://.../connect`.
+
 ## Relay config
 
 Example: [examples/relay.json](/Users/kai/Developer/utils/gotunnel/examples/relay.json)

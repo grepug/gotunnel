@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -61,7 +62,11 @@ func (c *Client) Start(ctx context.Context) error {
 			return nil
 		}
 		if err != nil && errors.Is(err, errUnauthorized) {
+			log.Printf("gotunnel: relay rejected credentials")
 			return err
+		}
+		if err != nil {
+			log.Printf("gotunnel: relay session ended: %v", err)
 		}
 
 		select {
@@ -69,6 +74,7 @@ func (c *Client) Start(ctx context.Context) error {
 			return nil
 		case <-time.After(backoff):
 		}
+		log.Printf("gotunnel: reconnecting to relay in %s", backoff)
 
 		if backoff < 5*time.Second {
 			backoff *= 2
@@ -84,6 +90,7 @@ func (c *Client) runOnce(ctx context.Context) error {
 		return err
 	}
 	defer conn.Close()
+	log.Printf("gotunnel: connected to relay %s", c.cfg.RelayURL)
 	configureWebSocket(conn)
 
 	sess := &clientSession{
@@ -119,6 +126,7 @@ func (c *Client) runOnce(ctx context.Context) error {
 	if err := sess.write(protocol.Frame{Type: protocol.FrameRegister, Payload: registerPayload}); err != nil {
 		return err
 	}
+	log.Printf("gotunnel: registered %d target(s)", len(targetNames))
 
 	for {
 		select {

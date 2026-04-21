@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -84,6 +85,10 @@ func NewServer(cfg config.RelayConfig) (*Server, error) {
 
 func (s *Server) Start(ctx context.Context) error {
 	errCh := make(chan error, 1)
+	log.Printf("gotunneld: control listener on %s", s.controlListener.Addr().String())
+	for name, ln := range s.publicListeners {
+		log.Printf("gotunneld: public listener %s on %s", name, ln.Addr().String())
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -149,12 +154,14 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.replaceSession(sess)
+	log.Printf("gotunneld: agent connected with %d target(s)", len(sess.targets))
 	stopHeartbeat := make(chan struct{})
 	go sess.heartbeat(stopHeartbeat)
 	defer func() {
 		close(stopHeartbeat)
 		s.clearSession(sess)
 		sess.close()
+		log.Printf("gotunneld: agent session closed")
 	}()
 
 	if err := s.readLoop(sess); err != nil && !errors.Is(err, net.ErrClosed) {
