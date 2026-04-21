@@ -1,6 +1,6 @@
 # gotunnel
 
-`gotunnel` is a personal self-hosted reverse tunnel for exposing selected local TCP services through a VPS.
+`gotunnel` is a small self-hosted reverse tunnel for exposing selected local TCP services through a VPS.
 
 Current `v1` focus:
 
@@ -8,7 +8,165 @@ Current `v1` focus:
 - generic TCP forwarding for local HTTP ports
 - generic TCP forwarding for remote desktop ports
 
-## Current shape
+## Who it is for
+
+`gotunnel` is for people who want a small tunnel they can run and understand themselves.
+
+Good fit:
+
+- reach your home or office machine over SSH through one VPS
+- expose one or two local web ports on fixed public VPS ports
+- forward a desktop port without setting up a full VPN
+
+Not the goal:
+
+- multi-tenant public tunnel SaaS
+- hostname-based HTTP routing platform
+- zero-config mesh VPN
+- dynamic tunnel management UI or API
+
+## Start Here
+
+Start with three ideas:
+
+1. One VPS runs `gotunneld`.
+2. One local machine runs `gotunnel`.
+3. Each public VPS port forwards to one named local target.
+
+That is the whole system.
+
+## What A User Needs
+
+Most users only need these four values from the relay operator:
+
+- `relay_url`
+- `agent_id`
+- `auth_token`
+- the public ports that were assigned to that agent
+
+Relay TLS and certificate files are operator-managed today. Public users should not need to edit `tls_cert_file` or `tls_key_file` just to run an agent.
+
+## Build
+
+`gotunnel` currently builds from source:
+
+```bash
+go build ./cmd/gotunnel ./cmd/gotunneld
+```
+
+## Quick Start
+
+Start with SSH first. It is the smallest success path and the easiest to verify.
+
+### 1. Create an agent config
+
+Example:
+
+- [examples/agent.json](examples/agent.json)
+
+Minimal agent config:
+
+```json
+{
+  "relay_url": "wss://your-vps:18443/connect",
+  "agent_id": "home-mac",
+  "auth_token": "replace-me-home-mac",
+  "targets": [
+    {
+      "name": "ssh",
+      "local_addr": "127.0.0.1:22"
+    }
+  ]
+}
+```
+
+### 2. Start the agent
+
+```bash
+./gotunnel -config /path/to/agent.json
+```
+
+### 3. Test SSH through the VPS
+
+```bash
+ssh -p 2222 your-user@your-vps
+```
+
+This example uses public SSH port `2222`. Use the public port that your relay operator assigned to your `ssh` target.
+
+If that works, the tunnel is up.
+
+For local development only, you can set `allow_insecure: true` and use `ws://.../connect` instead of `wss://.../connect`.
+
+## Add More Targets
+
+Once SSH works, adding `web` and `desktop` is only more config.
+
+### Add a web target
+
+```json
+{
+  "name": "web",
+  "local_addr": "127.0.0.1:3000"
+}
+```
+
+Test:
+
+```bash
+curl http://your-vps:28080/
+```
+
+This example uses public web port `28080`. Use the public port assigned on your relay.
+
+### Add a desktop target
+
+```json
+{
+  "name": "desktop",
+  "local_addr": "127.0.0.1:5900"
+}
+```
+
+`desktop` is only a label. The relay does not care whether the local service behind that label is VNC, RDP, or another TCP desktop protocol.
+
+Use the public desktop port assigned on your relay.
+
+## For Relay Operators
+
+If you run the VPS side, start here:
+
+- [docs/relay-setup.md](docs/relay-setup.md)
+- [docs/troubleshooting.md](docs/troubleshooting.md)
+
+The operator guide covers:
+
+- relay config and public port mappings
+- TLS and certificate handling for `wss://`
+- relay status inspection with `gotunneld -status`
+- where `state_file` fits
+
+Automatic TLS and certificate management are not built into `gotunnel` yet. Operators still manage those pieces outside the agent binary.
+
+## Run The Agent On macOS
+
+If you want the local agent to stay up through login sessions and restarts on macOS, use:
+
+- [docs/macos-launchd.md](docs/macos-launchd.md)
+
+## Examples
+
+- relay example: [examples/relay.json](examples/relay.json)
+- agent example: [examples/agent.json](examples/agent.json)
+- macOS launchd example: [examples/gotunnel.agent.plist.example](examples/gotunnel.agent.plist.example)
+
+The shipped examples use one consistent naming scheme:
+
+- `ssh`
+- `web`
+- `desktop`
+
+## Current Shape
 
 - `cmd/gotunneld`: relay process for the VPS
 - `cmd/gotunnel`: local agent process
@@ -19,225 +177,20 @@ Current `v1` focus:
 - automatic reconnect loop
 - encrypted control plane by default
 
-Plain `ws://` is only allowed when `allow_insecure` is explicitly set to `true`. That exists for local testing and development. Real deployments should use `wss://` with a valid certificate.
+Plain `ws://` is only allowed when `allow_insecure` is explicitly set to `true`.
 
-## Production TLS notes
+## Troubleshooting
 
-For a real deployment, prefer `wss://` on the control plane and keep insecure mode limited to local development.
+Start with these checks:
 
-One workable production path is an IP certificate using current Certbot support for Let's Encrypt short-lived IP certificates. For a relay running directly on a public IP:
+1. Verify the local target directly on the machine running `gotunnel`.
+2. Check the agent logs for reconnect or authentication failures.
+3. Check the relay logs on the VPS.
+4. Run `gotunneld -status` on the VPS if the relay uses `state_file`.
 
-1. temporarily free inbound port `80` so ACME HTTP-01 can succeed
-2. issue the certificate on the relay host with Certbot standalone
-3. point `tls_cert_file` and `tls_key_file` at the issued files
-4. restart `gotunneld`
-5. switch the local agent config from `ws://.../connect` to `wss://.../connect`
+Detailed operator troubleshooting lives in [docs/troubleshooting.md](docs/troubleshooting.md).
 
-Example issuance flow on Ubuntu:
-
-```bash
-sudo certbot certonly \
-  --standalone \
-  --non-interactive \
-  --agree-tos \
-  --register-unsafely-without-email \
-  --preferred-profile shortlived \
-  --ip-address 203.0.113.10
-```
-
-Typical relay config paths after issuance:
-
-- `/etc/letsencrypt/live/<ip>/fullchain.pem`
-- `/etc/letsencrypt/live/<ip>/privkey.pem`
-
-Because these IP certificates are short-lived, add a Certbot deploy hook so the relay reloads after renewal.
-
-Example deploy hook:
-
-```bash
-#!/bin/sh
-systemctl restart gotunneld
-```
-
-Place it at:
-
-```bash
-/etc/letsencrypt/renewal-hooks/deploy/gotunneld-restart.sh
-```
-
-If the host already uses port `80` for another ingress layer, standalone renewal also needs a way to free that port temporarily. On the live Ubuntu deployment used for `gotunnel`, Certbot renewal is paired with pre/post hooks that pause and then restore the existing k3s ingress controller around renewal.
-
-That pattern looks like:
-
-- pre-hook: stop or unschedule the process currently bound to `:80`
-- renewal: `certbot renew`
-- post-hook: restore the ingress process after renewal completes
-
-The important operational rule is simple: renewal must have a deterministic way to claim port `80`, or automatic renewal will silently fail later even if the first certificate issuance succeeded.
-
-## Build
-
-```bash
-go build ./cmd/gotunnel ./cmd/gotunneld
-```
-
-## Quick start
-
-1. Copy the example configs and replace the per-agent credentials and agent IDs.
-2. Choose a relay-local `state_file` path so the relay can persist last-known agent registration state.
-3. For a real deployment, point the relay config at your TLS certificate and key and use a `wss://` relay URL in the agent config.
-4. Start the relay on the VPS:
-
-```bash
-./gotunneld -config /path/to/relay.json
-```
-
-5. Start the agent on the local machine:
-
-```bash
-./gotunnel -config /path/to/agent.json
-```
-
-6. Connect to the VPS public port you mapped.
-
-Example:
-
-- relay port `2222` named `ssh` routed to `home-mac:ssh`
-- local agent `home-mac`
-- local target `ssh -> 127.0.0.1:22`
-
-Then:
-
-```bash
-ssh -p 2222 your-user@your-vps
-```
-
-For local development only, you can set `allow_insecure: true` in both configs and use `ws://.../connect` instead of `wss://.../connect`.
-
-## Inspect relay registration status
-
-If `state_file` is configured, `gotunneld` can print the persisted named-agent registration state without starting the relay server:
-
-```bash
-./gotunneld -config /path/to/relay.json -status
-```
-
-Example output shape:
-
-```text
-home-mac	inactive	targets=ssh,web	last_connected=2026-04-21T13:00:00Z	last_disconnected=-
-office-pc	inactive	targets=rdp	last_connected=2026-04-21T12:00:00Z	last_disconnected=2026-04-21T13:00:00Z
-lab-mini	never_connected	targets=-	last_connected=-	last_disconnected=-
-```
-
-This command is read-only. It prints the persisted last-known registration state from the relay-owned state file and does not create, edit, or delete relay registrations, credentials, or port mappings.
-
-Because `-status` does not coordinate with a live relay runtime, it renders persisted `active` records conservatively as offline `inactive` while preserving the last-known targets and connect timestamps.
-
-## macOS launchd management
-
-For a persistent local agent on macOS, prefer a per-user `LaunchAgent` over an ad hoc background shell process.
-
-Template:
-
-- [gotunnel.agent.plist.example](/Users/kai/Developer/utils/gotunnel/examples/gotunnel.agent.plist.example)
-
-Recommended layout:
-
-- binary: `~/.local/bin/gotunnel`
-- config: `~/.config/gotunnel/<name>.json`
-- plist: `~/Library/LaunchAgents/io.github.grepug.gotunnel.<name>.plist`
-- logs: `~/Library/Logs/gotunnel/<name>.out.log` and `~/Library/Logs/gotunnel/<name>.err.log`
-
-Basic management flow:
-
-1. Copy the plist template and replace the user, config path, label suffix, and log paths.
-2. Load it with `launchctl bootstrap`.
-3. Use `launchctl print` and the log files for status.
-
-Example commands:
-
-```bash
-mkdir -p ~/Library/LaunchAgents ~/Library/Logs/gotunnel
-cp examples/gotunnel.agent.plist.example ~/Library/LaunchAgents/io.github.grepug.gotunnel.ssh-124-156-225-91.plist
-```
-
-Load:
-
-```bash
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/io.github.grepug.gotunnel.ssh-124-156-225-91.plist
-```
-
-Restart after plist edits:
-
-```bash
-launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/io.github.grepug.gotunnel.ssh-124-156-225-91.plist
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/io.github.grepug.gotunnel.ssh-124-156-225-91.plist
-```
-
-Status:
-
-```bash
-launchctl print "gui/$(id -u)/io.github.grepug.gotunnel.ssh-124-156-225-91"
-```
-
-Manual restart without editing the plist:
-
-```bash
-launchctl kickstart -k "gui/$(id -u)/io.github.grepug.gotunnel.ssh-124-156-225-91"
-```
-
-Unload:
-
-```bash
-launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/io.github.grepug.gotunnel.ssh-124-156-225-91.plist
-```
-
-## Relay config
-
-Example: [examples/relay.json](/Users/kai/Developer/utils/gotunnel/examples/relay.json)
-
-Fields:
-
-- `control_addr`: relay control listener
-- `agents`: relay-side credentials for each named agent
-- `agents[].agent_id`: named agent that is allowed to connect
-- `agents[].auth_token`: credential accepted only for that named agent
-- `tls_cert_file`: certificate for the control connection
-- `tls_key_file`: private key for the control connection
-- `state_file`: relay-local JSON file for persisted named-agent registration metadata
-- `allow_insecure`: only for local testing; allows plain `ws://`
-- `ports`: public TCP listeners exposed on the VPS
-- `ports[].name`: public listener name
-- `ports[].agent_id`: which named agent should receive traffic for that listener
-- `ports[].target_name`: which target on that agent should be opened
-
-## Agent config
-
-Example: [examples/agent.json](/Users/kai/Developer/utils/gotunnel/examples/agent.json)
-
-Fields:
-
-- `relay_url`: `wss://.../connect` in normal use
-- `agent_id`: stable identity for this local machine or agent instance
-- `auth_token`: credential that must match the relay entry for this exact `agent_id`
-- `allow_insecure`: only for local testing with `ws://`
-- `targets`: local services reachable through the tunnel
-
-## Example flow
-
-Example SSH mapping:
-
-- relay port `0.0.0.0:2222` named `ssh` routed to agent `home-mac`
-- agent `home-mac` target `ssh` mapped to `127.0.0.1:22`
-
-With both binaries running, connecting to `vps:2222` reaches the local machine's SSH service through the tunnel.
-
-Different agents can expose the same target name, such as `ssh`, as long as each relay port mapping points to the intended `agent_id` explicitly.
-
-When `state_file` is configured, the relay persists one record per named agent with last-known targets and connection status. That metadata survives relay restarts, but credentials and per-port routing still come from static config.
-
-## Current limitations
+## Current Limitations
 
 - no hostname-based HTTP routing yet
 - no session preservation across reconnect
@@ -245,4 +198,4 @@ When `state_file` is configured, the relay persists one record per named agent w
 - no management API for dynamically registering or editing agents
 - no dynamic agent provisioning yet
 
-Those are deliberate `A`-phase omissions so the transport core can stay small and reliable first.
+Those are deliberate `A`-phase omissions so the transport core can stay small first.

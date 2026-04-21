@@ -1,13 +1,9 @@
 {
-  "control_addr": "0.0.0.0:443",
+  "control_addr": "0.0.0.0:18443",
   "agents": [
     {
       "agent_id": "home-mac",
       "auth_token": "replace-me-home-mac"
-    },
-    {
-      "agent_id": "office-pc",
-      "auth_token": "replace-me-office-pc"
     }
   ],
   "state_file": "/var/lib/gotunnel/relay-state.json",
@@ -22,15 +18,15 @@
     },
     {
       "name": "web",
-      "listen_addr": "0.0.0.0:8080",
+      "listen_addr": "0.0.0.0:28080",
       "agent_id": "home-mac",
       "target_name": "web"
     },
     {
-      "name": "rdp",
+      "name": "desktop",
       "listen_addr": "0.0.0.0:3389",
-      "agent_id": "office-pc",
-      "target_name": "rdp"
+      "agent_id": "home-mac",
+      "target_name": "desktop"
     }
   ]
 }
