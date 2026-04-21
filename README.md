@@ -20,6 +20,50 @@ Current `v1` focus:
 
 Plain `ws://` is only allowed when `allow_insecure` is explicitly set to `true`. That exists for local testing and development. Real deployments should use `wss://` with a valid certificate.
 
+## Production TLS notes
+
+For a real deployment, prefer `wss://` on the control plane and keep insecure mode limited to local development.
+
+One workable production path is an IP certificate using current Certbot support for Let's Encrypt short-lived IP certificates. For a relay running directly on a public IP:
+
+1. temporarily free inbound port `80` so ACME HTTP-01 can succeed
+2. issue the certificate on the relay host with Certbot standalone
+3. point `tls_cert_file` and `tls_key_file` at the issued files
+4. restart `gotunneld`
+5. switch the local agent config from `ws://.../connect` to `wss://.../connect`
+
+Example issuance flow on Ubuntu:
+
+```bash
+sudo certbot certonly \
+  --standalone \
+  --non-interactive \
+  --agree-tos \
+  --register-unsafely-without-email \
+  --preferred-profile shortlived \
+  --ip-address 203.0.113.10
+```
+
+Typical relay config paths after issuance:
+
+- `/etc/letsencrypt/live/<ip>/fullchain.pem`
+- `/etc/letsencrypt/live/<ip>/privkey.pem`
+
+Because these IP certificates are short-lived, add a Certbot deploy hook so the relay reloads after renewal.
+
+Example deploy hook:
+
+```bash
+#!/bin/sh
+systemctl restart gotunneld
+```
+
+Place it at:
+
+```bash
+/etc/letsencrypt/renewal-hooks/deploy/gotunneld-restart.sh
+```
+
 ## Build
 
 ```bash
