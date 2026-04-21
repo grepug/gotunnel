@@ -58,35 +58,58 @@ go build ./cmd/gotunnel ./cmd/gotunneld
 
 Start with SSH first. It is the smallest success path and the easiest to verify.
 
-### 1. Create an agent config
+### VPS Side
 
-Example:
+Before the local machine does anything, the relay operator or VPS owner should already have:
 
-- [examples/agent.json](examples/agent.json)
+- a running `gotunneld` relay
+- one public SSH port mapped to your agent, such as `2222`
+- your assigned `relay_url`
+- your assigned `agent_id`
+- your assigned `auth_token`
 
-Minimal agent config:
+### Host Machine Side
 
-```json
-{
-  "relay_url": "wss://your-vps:18443/connect",
-  "agent_id": "home-mac",
-  "auth_token": "replace-me-home-mac",
-  "targets": [
-    {
-      "name": "ssh",
-      "local_addr": "127.0.0.1:22"
-    }
-  ]
-}
-```
-
-### 2. Start the agent
+### 1. Initialize local config
 
 ```bash
-./gotunnel -config /path/to/agent.json
+./gotunnel init
 ```
 
-### 3. Test SSH through the VPS
+This creates the default local config home at `~/.gotunnel/agent.json`.
+
+### 2. Save relay and auth settings
+
+```bash
+./gotunnel set relay --url wss://your-vps:18443/connect
+./gotunnel set auth --agent-id home-mac --auth-token replace-me-home-mac
+```
+
+For local development only, you can use:
+
+```bash
+./gotunnel set relay --url ws://your-vps:18443/connect --allow-insecure
+```
+
+### 3. Add the SSH target
+
+```bash
+./gotunnel target add --name ssh --local-addr 127.0.0.1:22
+```
+
+You can inspect the stored config any time with:
+
+```bash
+./gotunnel show
+```
+
+### 4. Start the agent
+
+```bash
+./gotunnel run
+```
+
+### 5. Test SSH through the VPS
 
 ```bash
 ssh -p 2222 your-user@your-vps
@@ -96,19 +119,20 @@ This example uses public SSH port `2222`. Use the public port that your relay op
 
 If that works, the tunnel is up.
 
-For local development only, you can set `allow_insecure: true` and use `ws://.../connect` instead of `wss://.../connect`.
-
 ## Add More Targets
 
-Once SSH works, adding `web` and `desktop` is only more config.
+Once SSH works, adding `web` and `desktop` is only more commands.
+
+### VPS side
+
+For each extra target, the relay operator or VPS owner still needs to map a public port to that target name on your agent.
 
 ### Add a web target
 
-```json
-{
-  "name": "web",
-  "local_addr": "127.0.0.1:3000"
-}
+### Host machine side
+
+```bash
+./gotunnel target add --name web --local-addr 127.0.0.1:3000
 ```
 
 Test:
@@ -121,11 +145,10 @@ This example uses public web port `28080`. Use the public port assigned on your 
 
 ### Add a desktop target
 
-```json
-{
-  "name": "desktop",
-  "local_addr": "127.0.0.1:5900"
-}
+### Host machine side
+
+```bash
+./gotunnel target add --name desktop --local-addr 127.0.0.1:5900
 ```
 
 `desktop` is only a label. The relay does not care whether the local service behind that label is VNC, RDP, or another TCP desktop protocol.
@@ -157,7 +180,7 @@ If you want the local agent to stay up through login sessions and restarts on ma
 ## Examples
 
 - relay example: [examples/relay.json](examples/relay.json)
-- agent example: [examples/agent.json](examples/agent.json)
+- agent JSON example for advanced/manual use: [examples/agent.json](examples/agent.json)
 - macOS launchd example: [examples/gotunnel.agent.plist.example](examples/gotunnel.agent.plist.example)
 
 The shipped examples use one consistent naming scheme:
@@ -178,6 +201,7 @@ The shipped examples use one consistent naming scheme:
 - encrypted control plane by default
 
 Plain `ws://` is only allowed when `allow_insecure` is explicitly set to `true`.
+Manual JSON configs are still supported through `./gotunnel -config /path/to/agent.json` and `./gotunnel run -config /path/to/agent.json`.
 
 ## Troubleshooting
 

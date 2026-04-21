@@ -8,8 +8,7 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/Users/your-user/.local/bin/gotunnel</string>
-		<string>-config</string>
-		<string>/Users/your-user/.config/gotunnel/example.json</string>
+		<string>run</string>
 	</array>
 
 	<key>RunAtLoad</key>

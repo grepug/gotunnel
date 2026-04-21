@@ -23,7 +23,7 @@ If the local service is not healthy, the relay cannot fix that.
 Run the agent in the foreground first if needed:
 
 ```bash
-./gotunnel -config /path/to/agent.json
+./gotunnel run
 ```
 
 On macOS with `launchd`, inspect the service:
@@ -38,6 +38,7 @@ Common causes:
 - wrong `agent_id`
 - wrong `relay_url`
 - local target port is not listening
+- the stored config in `~/.gotunnel/agent.json` does not match what the relay operator assigned
 
 ## Check The Relay
 
