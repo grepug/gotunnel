@@ -1,0 +1,16 @@
+[Unit]
+Description=gotunnel relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/gotunnel/gotunneld -config /etc/gotunnel/relay.json
+WorkingDirectory=/opt/gotunnel
+Restart=always
+RestartSec=2
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

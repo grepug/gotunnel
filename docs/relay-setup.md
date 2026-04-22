@@ -4,6 +4,8 @@ This guide is for the person who runs the VPS relay.
 
 If you only need to connect a local machine to an existing relay, go back to the [main README](../README.md) and use the agent quick start there.
 
+If you want the first supported end-to-end operator path, start with [ubuntu-relay-bootstrap.md](ubuntu-relay-bootstrap.md).
+
 ## What The Relay Operator Owns
 
 The relay operator manages:
@@ -22,6 +24,22 @@ Automatic TLS and certificate management are not built into `gotunnel` yet. If y
 ```bash
 go build ./cmd/gotunnel ./cmd/gotunneld
 ```
+
+## Supported Bootstrap Path
+
+For `v1`, the first supported operator path is:
+
+- one public Ubuntu LTS VPS
+- `systemd`
+- direct `gotunneld` TLS termination
+- Certbot-managed short-lived IP certificates
+
+Use:
+
+- [ubuntu-relay-bootstrap.md](ubuntu-relay-bootstrap.md)
+- [../examples/relay.ubuntu-ip.json](../examples/relay.ubuntu-ip.json)
+- [../examples/gotunneld.service.example](../examples/gotunneld.service.example)
+- [../scripts/bootstrap-relay-ubuntu.sh](../scripts/bootstrap-relay-ubuntu.sh)
 
 ## Relay Config
 
