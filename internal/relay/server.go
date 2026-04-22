@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,6 +30,7 @@ const duplicateAgentErrorPrefix = "duplicate active agent id:"
 
 type Server struct {
 	cfg             config.RelayConfig
+	routes          []config.PortMapping
 	controlListener net.Listener
 	publicListeners map[string]net.Listener
 	publicRoutes    map[string]config.PortMapping
@@ -58,14 +60,25 @@ func NewServer(cfg config.RelayConfig) (*Server, error) {
 		return nil, err
 	}
 
+	stateStore, err := newRegistrationStore(cfg.StateFile, cfg.Agents)
+	if err != nil {
+		return nil, err
+	}
+
+	persistedRoutes := routeRegistrationsFromState(stateStore.state)
+	routes, err := resolvePublicRoutes(cfg, persistedRoutes)
+	if err != nil {
+		return nil, err
+	}
+
 	controlListener, err := net.Listen("tcp", cfg.ControlAddr)
 	if err != nil {
 		return nil, fmt.Errorf("listen control: %w", err)
 	}
 
-	publicListeners := make(map[string]net.Listener, len(cfg.Ports))
-	publicRoutes := make(map[string]config.PortMapping, len(cfg.Ports))
-	for _, mapping := range cfg.Ports {
+	publicListeners := make(map[string]net.Listener, len(routes))
+	publicRoutes := make(map[string]config.PortMapping, len(routes))
+	for _, mapping := range routes {
 		ln, err := net.Listen("tcp", mapping.ListenAddr)
 		if err != nil {
 			_ = controlListener.Close()
@@ -80,21 +93,13 @@ func NewServer(cfg config.RelayConfig) (*Server, error) {
 
 	s := &Server{
 		cfg:             cfg,
+		routes:          routes,
 		controlListener: controlListener,
 		publicListeners: publicListeners,
 		publicRoutes:    publicRoutes,
 		sessions:        make(map[string]*session),
+		stateStore:      stateStore,
 	}
-
-	stateStore, err := newRegistrationStore(cfg.StateFile, cfg.Agents)
-	if err != nil {
-		_ = controlListener.Close()
-		for _, open := range publicListeners {
-			_ = open.Close()
-		}
-		return nil, err
-	}
-	s.stateStore = stateStore
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(controlPath, s.handleControl)
@@ -119,7 +124,7 @@ func (s *Server) Start(ctx context.Context) error {
 		s.closeSession()
 	}()
 
-	for _, mapping := range s.cfg.Ports {
+	for _, mapping := range s.routes {
 		ln := s.publicListeners[mapping.Name]
 		go s.acceptPublic(ctx, mapping.Name, ln)
 	}
@@ -493,4 +498,51 @@ func configureWebSocket(conn *websocket.Conn) {
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(pongWait))
 	})
+}
+
+func resolvePublicRoutes(cfg config.RelayConfig, persistedRoutes []RouteRegistration) ([]config.PortMapping, error) {
+	effective := make(map[string]config.PortMapping, len(cfg.Ports)+len(persistedRoutes))
+	for _, port := range cfg.Ports {
+		effective[port.Name] = port
+	}
+	for _, route := range persistedRoutes {
+		effective[route.RouteName] = config.PortMapping{
+			Name:       route.RouteName,
+			ListenAddr: route.ListenAddr,
+			AgentID:    route.AgentID,
+			TargetName: route.TargetName,
+		}
+	}
+	if len(effective) == 0 {
+		return nil, errors.New("at least one public route is required")
+	}
+
+	names := make([]string, 0, len(effective))
+	for name := range effective {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	routes := make([]config.PortMapping, 0, len(names))
+	seenListenAddrs := make(map[string]string, len(names))
+	for _, name := range names {
+		route := effective[name]
+		if !isEphemeralListenAddr(route.ListenAddr) {
+			if other, ok := seenListenAddrs[route.ListenAddr]; ok {
+				return nil, fmt.Errorf("listen_addr %s conflicts between routes %s and %s", route.ListenAddr, other, route.Name)
+			}
+			seenListenAddrs[route.ListenAddr] = route.Name
+		}
+		routes = append(routes, route)
+	}
+
+	return routes, nil
+}
+
+func isEphemeralListenAddr(listenAddr string) bool {
+	addr, err := net.ResolveTCPAddr("tcp", listenAddr)
+	if err != nil {
+		return false
+	}
+	return addr.Port == 0
 }

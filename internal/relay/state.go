@@ -3,6 +3,8 @@ package relay
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,7 +15,7 @@ import (
 )
 
 const (
-	registrationStateVersion   = 1
+	registrationStateVersion   = 2
 	registrationStatusNever    = "never_connected"
 	registrationStatusActive   = "active"
 	registrationStatusInactive = "inactive"
@@ -29,6 +31,7 @@ type registrationStore struct {
 type persistedRelayState struct {
 	Version int                             `json:"version"`
 	Agents  map[string]persistedAgentRecord `json:"agents"`
+	Routes  map[string]persistedRouteRecord `json:"routes,omitempty"`
 }
 
 type persistedAgentRecord struct {
@@ -40,6 +43,13 @@ type persistedAgentRecord struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+type persistedRouteRecord struct {
+	RouteName  string `json:"route_name"`
+	ListenAddr string `json:"listen_addr"`
+	AgentID    string `json:"agent_id"`
+	TargetName string `json:"target_name"`
+}
+
 type AgentStatus struct {
 	AgentID            string
 	Status             string
@@ -47,6 +57,13 @@ type AgentStatus struct {
 	LastConnectedAt    time.Time
 	LastDisconnectedAt time.Time
 	UpdatedAt          time.Time
+}
+
+type RouteRegistration struct {
+	RouteName  string
+	ListenAddr string
+	AgentID    string
+	TargetName string
 }
 
 func LoadAgentStatuses(path string, agents []config.AgentAuth) ([]AgentStatus, error) {
@@ -103,6 +120,7 @@ func newRegistrationStore(path string, agents []config.AgentAuth) (*registration
 		state: persistedRelayState{
 			Version: registrationStateVersion,
 			Agents:  make(map[string]persistedAgentRecord),
+			Routes:  make(map[string]persistedRouteRecord),
 		},
 	}
 
@@ -149,6 +167,7 @@ func loadPersistedRelayState(path string) (persistedRelayState, error) {
 	state := persistedRelayState{
 		Version: registrationStateVersion,
 		Agents:  make(map[string]persistedAgentRecord),
+		Routes:  make(map[string]persistedRouteRecord),
 	}
 	if path == "" {
 		return state, nil
@@ -162,12 +181,88 @@ func loadPersistedRelayState(path string) (persistedRelayState, error) {
 		if state.Agents == nil {
 			state.Agents = make(map[string]persistedAgentRecord)
 		}
+		if state.Routes == nil {
+			state.Routes = make(map[string]persistedRouteRecord)
+		}
 		return state, nil
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		return state, nil
 	}
 	return persistedRelayState{}, err
+}
+
+func LoadRouteRegistrations(path string) ([]RouteRegistration, error) {
+	state, err := loadPersistedRelayState(path)
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, 0, len(state.Routes))
+	for routeName := range state.Routes {
+		names = append(names, routeName)
+	}
+	sort.Strings(names)
+
+	routes := make([]RouteRegistration, 0, len(names))
+	for _, routeName := range names {
+		record := state.Routes[routeName]
+		if record.RouteName == "" {
+			record.RouteName = routeName
+		}
+		routes = append(routes, RouteRegistration{
+			RouteName:  record.RouteName,
+			ListenAddr: record.ListenAddr,
+			AgentID:    record.AgentID,
+			TargetName: record.TargetName,
+		})
+	}
+
+	return routes, nil
+}
+
+func CreateRouteRegistration(path string, agents []config.AgentAuth, staticPorts []config.PortMapping, route RouteRegistration) error {
+	state, err := loadPersistedRelayState(path)
+	if err != nil {
+		return err
+	}
+
+	if err := validateRouteRegistration(route, agents); err != nil {
+		return err
+	}
+
+	if _, ok := state.Routes[route.RouteName]; ok {
+		return fmt.Errorf("route_name already exists: %s", route.RouteName)
+	}
+
+	routes := routeRegistrationsFromState(state)
+	routes = append(routes, route)
+	if _, err := resolvePublicRoutes(config.RelayConfig{Ports: staticPorts}, routes); err != nil {
+		return err
+	}
+
+	state.Routes[route.RouteName] = persistedRouteRecord{
+		RouteName:  route.RouteName,
+		ListenAddr: route.ListenAddr,
+		AgentID:    route.AgentID,
+		TargetName: route.TargetName,
+	}
+	return savePersistedRelayState(path, state)
+}
+
+func RemoveRouteRegistration(path, routeName string) (bool, error) {
+	state, err := loadPersistedRelayState(path)
+	if err != nil {
+		return false, err
+	}
+	if _, ok := state.Routes[routeName]; !ok {
+		return false, nil
+	}
+	delete(state.Routes, routeName)
+	if err := savePersistedRelayState(path, state); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *registrationStore) markActive(agentID string, targets map[string]struct{}) error {
@@ -211,21 +306,25 @@ func (s *registrationStore) markInactive(agentID string) error {
 }
 
 func (s *registrationStore) saveLocked() error {
-	if s.path == "" {
+	return savePersistedRelayState(s.path, s.state)
+}
+
+func savePersistedRelayState(path string, state persistedRelayState) error {
+	if path == "" {
 		return nil
 	}
 
-	s.state.Version = registrationStateVersion
-	raw, err := json.MarshalIndent(s.state, "", "  ")
+	state.Version = registrationStateVersion
+	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 
-	tmpFile, err := os.CreateTemp(filepath.Dir(s.path), "gotunnel-state-*.json")
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), "gotunnel-state-*.json")
 	if err != nil {
 		return err
 	}
@@ -239,9 +338,58 @@ func (s *registrationStore) saveLocked() error {
 		_ = os.Remove(tmpName)
 		return err
 	}
-	if err := os.Rename(tmpName, s.path); err != nil {
+	if err := os.Rename(tmpName, path); err != nil {
 		_ = os.Remove(tmpName)
 		return err
+	}
+	return nil
+}
+
+func routeRegistrationsFromState(state persistedRelayState) []RouteRegistration {
+	names := make([]string, 0, len(state.Routes))
+	for routeName := range state.Routes {
+		names = append(names, routeName)
+	}
+	sort.Strings(names)
+
+	routes := make([]RouteRegistration, 0, len(names))
+	for _, routeName := range names {
+		record := state.Routes[routeName]
+		if record.RouteName == "" {
+			record.RouteName = routeName
+		}
+		routes = append(routes, RouteRegistration{
+			RouteName:  record.RouteName,
+			ListenAddr: record.ListenAddr,
+			AgentID:    record.AgentID,
+			TargetName: record.TargetName,
+		})
+	}
+	return routes
+}
+
+func validateRouteRegistration(route RouteRegistration, agents []config.AgentAuth) error {
+	if route.RouteName == "" {
+		return errors.New("route_name is required")
+	}
+	if route.ListenAddr == "" {
+		return fmt.Errorf("listen_addr is required for route %s", route.RouteName)
+	}
+	if _, err := net.ResolveTCPAddr("tcp", route.ListenAddr); err != nil {
+		return fmt.Errorf("invalid listen_addr for route %s: %w", route.RouteName, err)
+	}
+	if route.AgentID == "" {
+		return fmt.Errorf("agent_id is required for route %s", route.RouteName)
+	}
+	knownAgents := make(map[string]struct{}, len(agents))
+	for _, agent := range agents {
+		knownAgents[agent.AgentID] = struct{}{}
+	}
+	if _, ok := knownAgents[route.AgentID]; !ok {
+		return fmt.Errorf("unknown agent_id %s for route %s", route.AgentID, route.RouteName)
+	}
+	if route.TargetName == "" {
+		return fmt.Errorf("target_name is required for route %s", route.RouteName)
 	}
 	return nil
 }

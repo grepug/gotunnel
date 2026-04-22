@@ -135,3 +135,86 @@ func TestLoadRelayConfigRequiresFullValidationOutsideStatusMode(t *testing.T) {
 		t.Fatal("expected full relay validation to fail without runtime fields")
 	}
 }
+
+func TestRunRoutesLifecycle(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "relay.json")
+	statePath := filepath.Join(t.TempDir(), "relay-state.json")
+	content := `{
+		"agents": [
+			{"agent_id": "home-mac", "auth_token": "secret"}
+		],
+		"state_file": "` + statePath + `"
+	}`
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write relay config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{
+		"-config", configPath,
+		"routes", "create",
+		"--name", "ssh",
+		"--listen", "127.0.0.1:2222",
+		"--agent", "home-mac",
+		"--target", "ssh",
+	}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("create route exit code = %d, stderr=%s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "created route ssh") {
+		t.Fatalf("unexpected create output: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = run([]string{
+		"-config", configPath,
+		"routes", "list",
+	}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("list routes exit code = %d, stderr=%s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "ssh\t127.0.0.1:2222\thome-mac\tssh") {
+		t.Fatalf("unexpected list output: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = run([]string{
+		"-config", configPath,
+		"routes", "remove",
+		"--name", "ssh",
+	}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("remove route exit code = %d, stderr=%s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "removed route ssh") {
+		t.Fatalf("unexpected remove output: %s", stdout.String())
+	}
+}
+
+func TestRunRoutesRequiresStateFile(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "relay.json")
+	content := `{
+		"agents": [
+			{"agent_id": "home-mac", "auth_token": "secret"}
+		]
+	}`
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write relay config: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run([]string{
+		"-config", configPath,
+		"routes", "list",
+	}, &stdout, &stderr)
+	if exitCode != 1 {
+		t.Fatalf("expected missing state_file to fail, exit code=%d stderr=%s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "state_file is required for routes commands") {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
+	}
+}
