@@ -1,0 +1,32 @@
+{
+  "control_addr": "0.0.0.0:18443",
+  "agents": [
+    {
+      "agent_id": "home-mac",
+      "auth_token": "replace-me-home-mac"
+    }
+  ],
+  "state_file": "/var/lib/gotunnel/relay-state.json",
+  "tls_cert_file": "/etc/letsencrypt/live/203.0.113.10/fullchain.pem",
+  "tls_key_file": "/etc/letsencrypt/live/203.0.113.10/privkey.pem",
+  "ports": [
+    {
+      "name": "ssh",
+      "listen_addr": "0.0.0.0:2222",
+      "agent_id": "home-mac",
+      "target_name": "ssh"
+    },
+    {
+      "name": "web",
+      "listen_addr": "0.0.0.0:28080",
+      "agent_id": "home-mac",
+      "target_name": "web"
+    },
+    {
+      "name": "desktop",
+      "listen_addr": "0.0.0.0:3389",
+      "agent_id": "home-mac",
+      "target_name": "desktop"
+    }
+  ]
+}
