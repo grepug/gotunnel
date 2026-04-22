@@ -41,6 +41,17 @@ Use:
 - [../examples/gotunneld.service.example](../examples/gotunneld.service.example)
 - [../scripts/bootstrap-relay-ubuntu.sh](../scripts/bootstrap-relay-ubuntu.sh)
 
+## Public Route Management
+
+You now have two supported ways to assign public ports on the VPS:
+
+- keep using static `ports` in relay config
+- manage persisted public routes locally with `gotunneld routes`
+
+Static `ports` are still supported. Persisted routes are the newer operator workflow when you want to add or remove public route registrations without hand-editing the relay JSON file.
+
+If you use the `gotunneld routes` workflow, `state_file` is required because the relay stores those route registrations there.
+
 ## Relay Config
 
 Example:
@@ -90,7 +101,7 @@ Example relay config:
 - `agents`: relay-side credentials for each named agent
 - `agents[].agent_id`: the only agent name allowed to use that credential
 - `agents[].auth_token`: the shared secret for that agent
-- `state_file`: optional relay-local JSON file for persisted last-known registration state
+- `state_file`: optional relay-local JSON file for persisted last-known registration state; required if you want `gotunneld routes` to manage persisted public route registrations
 - `tls_cert_file`: certificate for the control connection
 - `tls_key_file`: private key for the control connection
 - `allow_insecure`: local testing only; allows plain `ws://`
@@ -103,6 +114,44 @@ Example relay config:
 ```bash
 ./gotunneld -config /path/to/relay.json
 ```
+
+If your relay config keeps public listeners in static `ports`, that is enough.
+
+If you use persisted public route registrations, create them first and then start or restart the relay so it opens the matching listeners.
+
+## Manage Persisted Public Routes
+
+Create a public route registration on the VPS:
+
+```bash
+./gotunneld -config /path/to/relay.json routes create \
+  --name ssh \
+  --listen 0.0.0.0:2222 \
+  --agent home-mac \
+  --target ssh
+```
+
+List persisted public route registrations:
+
+```bash
+./gotunneld -config /path/to/relay.json routes list
+```
+
+Example output shape:
+
+```text
+ssh	0.0.0.0:2222	home-mac	ssh
+web	0.0.0.0:28080	home-mac	web
+desktop	0.0.0.0:3389	home-mac	desktop
+```
+
+Remove a persisted public route registration:
+
+```bash
+./gotunneld -config /path/to/relay.json routes remove --name ssh
+```
+
+In this first slice, route changes are persisted locally but are not hot-reloaded into an already running relay process. After `routes create` or `routes remove`, restart `gotunneld` if the relay is already running.
 
 ## TLS Notes
 

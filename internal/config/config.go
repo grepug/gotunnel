@@ -55,8 +55,8 @@ func (c RelayConfig) Validate() error {
 	if !c.AllowInsecure && c.TLSCertFile == "" {
 		return errors.New("tls_cert_file and tls_key_file are required unless allow_insecure is true")
 	}
-	if len(c.Ports) == 0 {
-		return errors.New("at least one port mapping is required")
+	if len(c.Ports) == 0 && c.StateFile == "" {
+		return errors.New("at least one port mapping or state_file is required")
 	}
 
 	if err := c.validateAgentAuths(); err != nil {

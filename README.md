@@ -68,6 +68,11 @@ Before the local machine does anything, the relay operator or VPS owner should a
 - your assigned `agent_id`
 - your assigned `auth_token`
 
+On the VPS side, that public port can still be assigned either:
+
+- in static relay config under `ports`
+- or with the local relay-admin command `gotunneld routes create`
+
 ### Host Machine Side
 
 ### 1. Initialize local config
@@ -165,6 +170,7 @@ If you run the VPS side, start here:
 The operator guide covers:
 
 - relay config and public port mappings
+- local public-route management with `gotunneld routes`
 - TLS and certificate handling for `wss://`
 - relay status inspection with `gotunneld -status`
 - where `state_file` fits

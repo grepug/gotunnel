@@ -204,6 +204,19 @@ func TestRelayConfigValidateRejectsMissingAgents(t *testing.T) {
 	}
 }
 
+func TestRelayConfigValidateAcceptsStateFileWithoutStaticPorts(t *testing.T) {
+	cfg := config.RelayConfig{
+		ControlAddr:   "127.0.0.1:0",
+		Agents:        []config.AgentAuth{{AgentID: "mac-mini", AuthToken: "secret"}},
+		StateFile:     "/tmp/relay-state.json",
+		AllowInsecure: true,
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected persisted-route relay config to validate, got %v", err)
+	}
+}
+
 func TestRelayConfigValidateRejectsDuplicateAgentIDs(t *testing.T) {
 	cfg := config.RelayConfig{
 		ControlAddr: "127.0.0.1:0",
